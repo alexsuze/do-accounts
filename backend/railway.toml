@@ -1,0 +1,10 @@
+# Railway 部署設定（monorepo：Root Directory 請在 Railway 服務設定為 backend）
+[build]
+builder = "NIXPACKS"
+buildCommand = "./mvnw -q -DskipTests package"
+
+[deploy]
+startCommand = "java -jar target/backend-0.0.1-SNAPSHOT.jar"
+healthcheckPath = "/actuator/health/liveness"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"

@@ -6,7 +6,16 @@
 ## 必讀文件
 - `docs/SA.md`：需求（功能、使用案例）。任何功能實作以此為準。
 - `docs/SD.md`：設計（架構、MongoDB 集合、API、核心演算法、開發階段）。**新增或修改欄位時同步更新 SD 第 2 章。**
-- `docs/開發進度.md`（開始實作後建立）：**每完成一個階段都要更新。**
+- `docs/開發進度.md`：目前進度、已完成項目、下一步。**每完成一個階段都要更新。**
+
+## 開發指令
+```bash
+cd backend && ./mvnw spring-boot:run          # http://localhost:8080（本機沒有 MongoDB 時 /api/ping 仍可用）
+cd backend && ./mvnw -B test                   # 後端測試（不需要 MongoDB）
+cd frontend && npm install && npm run dev      # http://localhost:5173
+cd frontend && npm test                        # utils 純函式測試
+cd frontend && npm run build                   # 驗證可建置
+```
 
 ## 技術架構
 | 層 | 技術 | 部署 |

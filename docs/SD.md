@@ -921,8 +921,8 @@ sequenceDiagram
 | 寬度 | 版面 |
 |---|---|
 | ≥ 1024px（`lg`） | 左側固定側邊欄（232–260px）＋內容區（內距 28–32px）；表格顯示完整欄位；對話框置中 |
-| 640–1023px | 側邊欄收合成可展開的抽屜；卡片改為單欄或雙欄 |
-| < 640px | 底部導覽列（總覽、明細、記帳、報表、更多）；表格改為卡片清單；對話框全螢幕；表格模式改為 `TransactionCardList` |
+| 640–1023px | 與手機相同使用底部導覽列；卡片改為單欄或雙欄 |
+| < 640px | 底部導覽列（總覽、明細、記帳、報表、更多；「更多」開啟全部功能的抽屜）；表格改為卡片清單；對話框全螢幕；表格模式改為 `TransactionCardList` |
 
 - 寬表格（持倉、表格模式、匯入預覽）放在 `overflow-x-auto` 容器中，不讓整頁橫向捲動。
 - 側邊欄＋內容用 `flex-wrap`，內容區 `flex: 999 1 560px; min-width: 0`，窄螢幕自動換行。
@@ -959,7 +959,8 @@ sequenceDiagram
 
 | 對象 | 流程 |
 |---|---|
-| 前端 | push `main` 且 `frontend/**` 有變動 → `.github/workflows/deploy-frontend.yml`：`npm ci` → `npm run build`（`VITE_BASE_PATH=/do-accounts/`）→ `deploy-pages` |
+| 前端 | push `main` 且 `frontend/**` 有變動 → `.github/workflows/deploy-frontend.yml`：`npm ci` → `npm test` → `npm run build`（`VITE_BASE_PATH=/do-accounts/`）→ `deploy-pages` |
+| CI | PR 與 `main` 以外的分支 → `.github/workflows/ci.yml`：後端 `./mvnw test`、前端 `npm test` ＋ `npm run build`（不部署、不使用 Secrets） |
 | 後端 | Railway 連結 repo，Root Directory = `backend`；`railway.toml`：build `./mvnw -q -DskipTests package`、start `java -jar target/backend-0.0.1-SNAPSHOT.jar`、healthcheck `/actuator/health/liveness`；`nixpacks.toml` 指定 `jdk21` |
 
 ### 6.3 環境變數
@@ -1022,7 +1023,7 @@ spring.servlet.multipart.max-file-size=5MB
 |---|---|---|
 | 後端單元 | `TransactionService.buildEntries`（每種類型、跨幣別、手續費、錯誤）、`HoldingCalculator`、`FxService` 查找、`ImportService` 解析與重複判斷、`BudgetService` 花費計算、`TokenService`、資料隔離 | JUnit 5 ＋ Mockito（比照 to-do-schedule：用 mock repository ＋ 記憶體 List，不需要 MongoDB） |
 | 後端整合 | aggregation 查詢（餘額、報表） | `@DataMongoTest` ＋ Testcontainers MongoDB（CI 才跑；本機沒有 Docker 時略過） |
-| 前端 | `utils/money.js`、`utils/expr.js`、`utils/date.js` | `node --test src/utils` |
+| 前端 | `utils/theme.js`、`utils/money.js`、`utils/expr.js`、`utils/date.js` | `npm test`（`node --test "src/utils/*.test.js"`） |
 | 手動驗收 | 每個階段結束後依 SA 使用案例實際操作 | — |
 
 ---
