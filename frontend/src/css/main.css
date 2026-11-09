@@ -96,5 +96,8 @@
   a { color: var(--accent); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button { cursor: pointer; }
+  /* 原生下拉選單的選項：明確指定底色與字色，避免深色模式下白底配淺色字看不到 */
+  select option, select optgroup { background-color: var(--panel); color: var(--text); }
+  select option:disabled { color: var(--muted); }
   button:disabled { cursor: not-allowed; }
 }
