@@ -1,15 +1,24 @@
 # do-accounts
 
-個人記帳理財系統（新版），前身為 [alexsuze/money](https://github.com/alexsuze/money)。
+個人記帳理財系統（新版），前身為 [alexsuze/money](https://github.com/alexsuze/money)；技術架構比照 [alexsuze/to-do-schedule](https://github.com/alexsuze/to-do-schedule)。
 
 目前處於**規劃階段**，請先閱讀：
 
 - [docs/SA.md](./docs/SA.md)：系統分析（需求、使用案例、資料實體）
-- [docs/SD.md](./docs/SD.md)：系統設計（架構、資料庫、API、核心模組、開發階段）
+- [docs/SD.md](./docs/SD.md)：系統設計（架構、MongoDB 集合、API、核心模組、開發階段）
+
+## 技術架構
+
+| 層 | 技術 |
+|---|---|
+| 前端 | Vite + Vue 3 + Pinia（UI 元件庫待 UI 設計確認後決定） → GitHub Pages |
+| 後端 | Java 21 + Spring Boot 4 → Railway |
+| 資料庫 | MongoDB Atlas |
+| 登入 | Google 登入＋管理員核准 |
 
 ## 與舊版的主要差異
 
 - 加入登入驗證，資料依使用者隔離
-- 資料庫改用 PostgreSQL，以「交易＋分錄」模型推導帳戶餘額，不再需要手動同步
-- 金額使用定點小數，匯率按日保存
+- 「交易＋分錄」模型，帳戶餘額由分錄推導，不再需要手動同步
+- 金額使用 `Decimal128` 精確小數，匯率按日保存
 - 新增投資管理、CSV 匯入匯出、JSON 備份
