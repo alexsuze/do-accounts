@@ -8,7 +8,7 @@
     <template v-if="d">
       <section class="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
         <StatCard glow label="淨資產 · Net worth" :value="fmt(d.net_worth, { symbol: true })" :hint="rateHint" />
-        <StatCard label="總資產 · Assets" :value="fmt(d.assets)" :hint="`${d.base_currency}，含外幣帳戶`" />
+        <StatCard label="總資產 · Assets" :value="fmt(d.assets)" :hint="`${d.base_currency}，含外幣、不含總覽隱藏的帳戶`" />
         <StatCard label="總負債 · Liabilities" :value="fmt(d.liabilities)" :tone="Number(d.liabilities) < 0 ? 'exp' : ''" hint="信用卡、貸款與負餘額帳戶" />
       </section>
 
@@ -119,7 +119,11 @@ const trend = ref([])
 
 const fmt = (v, opt = {}, cur) => formatAmount(v, cur ?? d.value?.base_currency ?? 'TWD', { sign: 'auto', ...opt })
 const visibleGroups = computed(() => accounts.groups.map(g => ({ ...g, items: g.items.filter(a => a.visible) })).filter(g => g.items.length))
-const rateHint = computed(() => d.value?.rates_date ? `${d.value.base_currency} · 外幣依 ${shortDate(d.value.rates_date)} 匯率換算` : `以 ${d.value?.base_currency} 計`)
+const rateHint = computed(() => {
+  const parts = [d.value?.rates_date ? `外幣依 ${shortDate(d.value.rates_date)} 匯率換算` : `以 ${d.value?.base_currency} 計`]
+  if (d.value?.hidden_accounts) parts.push(`未含隱藏帳戶 ${d.value.hidden_accounts} 個`)
+  return parts.join(' · ')
+})
 // 外幣帳戶加註約當本位幣（FR-7.2）
 const approx = (a) => {
   const v = fx.toBase(a.balance, a.currency, d.value.base_currency)

@@ -80,7 +80,7 @@ public class ReportService {
             BigDecimal assets = BigDecimal.ZERO;
             BigDecimal liabilities = BigDecimal.ZERO;
             for (Account a : all) {
-                if (a.openingDate.compareTo(end) > 0) continue; // 還沒開戶
+                if (!a.visible || a.openingDate.compareTo(end) > 0) continue; // 總覽隱藏的帳戶不計入；還沒開戶
                 BigDecimal bal = a.openingBalance;
                 TreeMap<String, BigDecimal> sums = monthly.get(a.id);
                 if (sums != null) {

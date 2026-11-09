@@ -183,7 +183,7 @@ do-accounts/
 | opening_balance | Decimal128 | 初始餘額；信用卡／貸款為負數。有交易後仍可修改（餘額即時計算，自動生效） |
 | opening_date | string | `YYYY-MM-DD`，開戶日期；資產趨勢從這天開始計入。所有交易日期必須 ≥ 此日期；修改時不可晚於該帳戶最早的交易日期（否則 422） |
 | order | int | 同 kind 內的顯示順序 |
-| visible | boolean | 首頁是否顯示 |
+| visible | boolean | 總覽是否顯示；**false 時不計入總覽的資產、負債、淨資產與淨資產趨勢**（收支、預算、報表的收支照算） |
 | archived_at | Date / null | 非 null 即封存 |
 | credit | object / null | 信用卡：`{ limit, statement_day, due_day }` |
 | note | string | |

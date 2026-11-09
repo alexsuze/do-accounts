@@ -155,5 +155,15 @@ class ReportServiceTest {
         assertEquals(1, d.budget().top().size());
         eq("32.0", d.budget().top().getFirst().percentage());
         assertEquals(80, d.budget().warnPct());
+
+        // 總覽隱藏的帳戶不計入資產負債與淨資產趨勢，但收支照算
+        f.accountService.update(ME, usd.id, new com.doaccounts.service.AccountService.AccountRequest(usd.name, usd.kind, usd.currency,
+                usd.openingBalance, usd.openingDate, false, null, null));
+        var h = f.dashboardService.get(f.me);
+        eq("1000", h.assets());
+        eq("500", h.netWorth());
+        assertEquals(1, h.hiddenAccounts());
+        eq("320", h.monthTotals().expense());
+        eq("500", f.reportService.netWorth(f.me, 1).points().getLast().netWorth());
     }
 }

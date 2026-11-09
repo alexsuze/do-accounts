@@ -42,9 +42,10 @@ public class DashboardService {
 
     /**
      * @param ratesDate 換算外幣帳戶用的匯率中最舊的日期（FR-8.3 在畫面標示匯率日期）；沒有外幣帳戶時為 null
+     * @param hiddenAccounts 設為「總覽隱藏」而未計入資產負債的帳戶數（有餘額的才算）
      */
     public record Dashboard(String baseCurrency, BigDecimal netWorth, BigDecimal assets, BigDecimal liabilities,
-                            String ratesDate, String month, Totals monthTotals, BudgetSummary budget,
+                            String ratesDate, int hiddenAccounts, String month, Totals monthTotals, BudgetSummary budget,
                             List<Transaction> recent) {}
 
     public Dashboard get(User user) {
@@ -54,10 +55,15 @@ public class DashboardService {
         BigDecimal assets = BigDecimal.ZERO;
         BigDecimal liabilities = BigDecimal.ZERO;
         String ratesDate = null;
+        int hidden = 0;
         Map<String, String> currencyOf = new HashMap<>();
         for (Account a : accounts.list(user.id, true)) {
             currencyOf.put(a.id, a.currency);
             if (a.balance.signum() == 0) continue;
+            if (!a.visible) { // 總覽隱藏的帳戶不計入資產、負債、淨資產（收支與預算照算）
+                hidden++;
+                continue;
+            }
             if (!base.equals(a.currency)) {
                 String d = rateDate(rates, a.currency, base, today);
                 if (d != null && (ratesDate == null || d.compareTo(ratesDate) < 0)) ratesDate = d;
@@ -84,7 +90,7 @@ public class DashboardService {
         BudgetView bv = budgets.view(user, m.toString());
         List<BudgetItem> top = bv.items().stream().sorted(Comparator.comparing(BudgetItem::percentage).reversed()).limit(TOP_BUDGETS).toList();
 
-        return new Dashboard(base, assets.add(liabilities), assets, liabilities, ratesDate, m.toString(), totals,
+        return new Dashboard(base, assets.add(liabilities), assets, liabilities, ratesDate, hidden, m.toString(), totals,
                 new BudgetSummary(bv.warnPct(), bv.total(), top), ledger.recent(user.id, 5));
     }
 
