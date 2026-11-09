@@ -85,6 +85,24 @@
           <span v-if="seedOnly" class="text-xs text-warn">目前還是內建的初始匯率，排程抓到最新匯率後會自動更新；需要精確數字可以先手動覆寫。</span>
         </AppCard>
 
+        <AppCard>
+          <h2 class="m-0 mb-1 font-head text-base font-semibold">資料與備份</h2>
+          <div class="flex flex-wrap items-center gap-3 border-b border-line py-3.5">
+            <span class="mr-auto flex flex-col gap-0.5"><span>完整備份</span><span class="text-xs text-muted">帳戶、分類、交易、預算、手動匯率、匯入範本，JSON 檔</span></span>
+            <AppButton variant="ghost" :loading="busyBackup" @click="downloadBackup"><Download :size="16" aria-hidden="true" />下載備份</AppButton>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 border-b border-line py-3.5">
+            <span class="mr-auto flex flex-col gap-0.5"><span>從備份還原</span><span class="text-xs text-muted">只能還原到還沒有任何交易的帳號（例如新帳號）</span></span>
+            <label class="inline-flex h-11 cursor-pointer items-center gap-2 rounded-[10px] border border-line bg-panel px-4 text-sm hover:bg-panel2">
+              <Upload :size="16" aria-hidden="true" />選擇備份檔
+              <input type="file" accept=".json,application/json" class="sr-only" aria-label="選擇備份檔" @change="pickBackup">
+            </label>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 py-3.5">
+            <span class="mr-auto flex flex-col gap-0.5"><span>CSV 匯入匯出</span><span class="text-xs text-muted">銀行對帳單匯入、匯入紀錄與整批撤銷</span></span>
+            <RouterLink to="/import" class="text-sm">前往匯入匯出 →</RouterLink>
+          </div>
+        </AppCard>
         <AppCard v-if="auth.isAdmin" class="flex flex-wrap items-center gap-3">
           <span class="lbl mr-auto">管理員工具</span>
           <RouterLink to="/admin" class="text-sm">使用者核准 →</RouterLink>
@@ -105,6 +123,8 @@
         <AppButton type="submit" form="fx-form" :loading="busy">儲存</AppButton>
       </template>
     </AppDialog>
+    <ConfirmDialog v-model:open="restoreOpen" :title="`從「${restoreFile?.name}」還原？`" confirm-text="還原"
+      :description="restoreFile?.summary" @confirm="restore" />
     <ConfirmDialog v-model:open="baseConfirm" :title="`本位幣改成 ${pendingBase}？`" confirm-text="變更"
       description="總覽與報表會改用新的本位幣換算。已設定的預算金額不會換算，請到預算頁確認金額。" @confirm="save({ base_currency: pendingBase })" />
   </div>
@@ -113,7 +133,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { LogOut } from 'lucide-vue-next'
+import { Download, LogOut, Upload } from 'lucide-vue-next'
 import AppButton from '../components/ui/AppButton.vue'
 import AppCard from '../components/ui/AppCard.vue'
 import AppDialog from '../components/ui/AppDialog.vue'
@@ -129,6 +149,9 @@ import { useUiStore } from '../stores/ui'
 import { useFxStore } from '../stores/fx'
 import { toast } from '../stores/toast'
 import api from '../services/api'
+import { download } from '../services/download'
+import { useAccountsStore } from '../stores/accounts'
+import { useCategoriesStore } from '../stores/categories'
 import { CURRENCY_OPTIONS } from '../utils/labels'
 import { shortDate, today } from '../utils/date'
 
@@ -212,6 +235,37 @@ async function removeManual (r) {
   await loadFx()
 }
 onMounted(loadFx)
+
+// ---------- 備份與還原（SA FR-10.8） ----------
+const busyBackup = ref(false)
+const restoreFile = ref(null)
+const restoreOpen = ref(false)
+async function downloadBackup () {
+  busyBackup.value = true
+  try { await download('/export/backup', `do-accounts-backup-${today()}.json`) } finally { busyBackup.value = false }
+}
+async function pickBackup (e) {
+  const f = e.target.files?.[0]
+  e.target.value = ''
+  if (!f) return
+  let data
+  try { data = JSON.parse(await f.text()) } catch { return toast.error('檔案不是正確的 JSON') }
+  if (data?.format !== 'do-accounts-backup') return toast.error('這不是 do-accounts 的備份檔')
+  const n = (k) => (data[k] ?? []).length
+  restoreFile.value = {
+    name: f.name, data,
+    summary: `備份時間 ${String(data.exported_at ?? '').slice(0, 10)}：帳戶 ${n('accounts')} 個、分類 ${n('categories')} 個、交易 ${n('transactions')} 筆、預算 ${n('budgets')} 項。目前的帳戶、分類與預算設定會被取代。`
+  }
+  restoreOpen.value = true
+}
+async function restore () {
+  const f = restoreFile.value
+  if (!f) return
+  const { data } = await api.post('/import/backup', f.data, { timeout: 120000 })
+  toast.success(`已還原：帳戶 ${data.accounts} 個、交易 ${data.transactions} 筆`)
+  await Promise.all([auth.refresh(), useAccountsStore().load(), useCategoriesStore().load(), loadFx()])
+  ui.ledgerChanged()
+}
 
 function logout () {
   auth.logout()

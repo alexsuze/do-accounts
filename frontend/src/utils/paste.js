@@ -1,28 +1,13 @@
 // 從 Excel／Google 試算表貼上（SA FR-3.14、SD 4.2.1）：解析 Tab 分隔文字、日期與金額格式、名稱比對
 // 純函式，不碰 DOM，方便 node --test
+import { parseDelimited } from './csv.js'
 
 /**
- * 剪貼簿文字 → 二維陣列。Excel 會把含換行或 Tab 的格子用雙引號包起來，引號內的 "" 代表一個 "。
+ * 剪貼簿文字 → 二維陣列（Tab 分隔）。Excel 會把含換行或 Tab 的格子用雙引號包起來，引號內的 "" 代表一個 "。
  * 最後一行若是空的（Excel 複製會多一個換行）就去掉。
  */
 export function parseClipboard (text) {
-  const rows = []
-  let row = []
-  let cell = ''
-  let quoted = false
-  const s = String(text ?? '').replace(/\r\n?/g, '\n')
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i]
-    if (quoted) {
-      if (ch === '"' && s[i + 1] === '"') { cell += '"'; i++ } else if (ch === '"') quoted = false
-      else cell += ch
-    } else if (ch === '"' && cell === '') quoted = true
-    else if (ch === '\t') { row.push(cell); cell = '' } else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = '' } else cell += ch
-  }
-  row.push(cell)
-  rows.push(row)
-  while (rows.length && rows.at(-1).every(c => c.trim() === '')) rows.pop()
-  return rows.map(r => r.map(c => c.trim()))
+  return parseDelimited(text, '\t')
 }
 
 const pad = (n) => String(n).padStart(2, '0')

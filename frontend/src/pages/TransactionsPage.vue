@@ -1,6 +1,7 @@
 <template>
   <div class="flex flex-col gap-5">
     <PageHeader eyebrow="Transactions" title="明細">
+      <AppButton variant="ghost" :loading="exporting" @click="exportCsv"><Download :size="16" aria-hidden="true" />匯出 CSV</AppButton>
       <AppButton variant="ghost" :to="{ path: '/transactions/grid', query: gridQuery }"><Table :size="16" aria-hidden="true" />表格編輯</AppButton>
       <AppButton @click="ui.openTx()"><Plus :size="16" aria-hidden="true" />記帳</AppButton>
     </PageHeader>
@@ -70,7 +71,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Plus, Search, Table } from 'lucide-vue-next'
+import { Download, Plus, Search, Table } from 'lucide-vue-next'
 import Amount from '../components/ui/Amount.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import AppCard from '../components/ui/AppCard.vue'
@@ -92,6 +93,7 @@ import { useCategoriesStore } from '../stores/categories'
 import { useUiStore } from '../stores/ui'
 import { toast } from '../stores/toast'
 import { monthRange, thisMonth, weekday } from '../utils/date'
+import { download } from '../services/download'
 import { formatAmount } from '../utils/money'
 
 // 明細（SA FR-3.4、3.5、3.9）。篩選條件同步到網址，可重新整理、可返回
@@ -165,14 +167,31 @@ function setFilter (patch, resetPage = true) {
   router.replace({ query })
 }
 
-async function load () {
-  const f = filter.value
+// 篩選條件 → API 參數（列表與 CSV 匯出共用）
+function filterParams (f) {
   const { from, to } = monthRange(f.month)
-  const params = { from, to, page: f.page, size: SIZE }
+  const params = { from, to }
   if (f.kind) params.kind = f.kind
   if (f.account) params.account_id = f.account
   if (f.category) params.category_id = f.category
   if (f.q) params.q = f.q
+  return params
+}
+
+// 依目前的篩選條件匯出（SA FR-10.1）
+const exporting = ref(false)
+async function exportCsv () {
+  exporting.value = true
+  try {
+    await download('/export/transactions', `do-accounts-${filter.value.month}${hasFilter.value ? '-篩選' : ''}.csv`, filterParams(filter.value))
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function load () {
+  const f = filter.value
+  const params = { ...filterParams(f), page: f.page, size: SIZE }
   const [res] = await Promise.all([api.get('/transactions', { params }), accounts.ensure(), categories.ensure()])
   page.value = res.data
   selected.clear()

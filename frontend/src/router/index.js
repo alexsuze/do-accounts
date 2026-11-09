@@ -19,7 +19,7 @@ const routes = [
       { path: 'budgets', name: 'budgets', component: () => import('../pages/BudgetsPage.vue'), meta: { title: '預算' } },
       { path: 'reports', name: 'reports', component: () => import('../pages/ReportsPage.vue'), meta: { title: '報表' } },
       { path: 'investments', name: 'investments', ...soon('投資', 4) },
-      { path: 'import', name: 'import', ...soon('匯入匯出', 3) },
+      { path: 'import', name: 'import', component: () => import('../pages/ImportPage.vue'), meta: { title: '匯入匯出' } },
       { path: 'settings', name: 'settings', component: () => import('../pages/SettingsPage.vue'), meta: { title: '設定' } },
       { path: 'admin', name: 'admin', component: () => import('../pages/AdminPage.vue'), meta: { title: '管理', admin: true } }
     ]

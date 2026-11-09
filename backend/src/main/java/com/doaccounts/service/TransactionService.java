@@ -138,10 +138,54 @@ public class TransactionService {
 
     /** 檢查並把 request 填進交易（含重建分錄）。錯誤以 FieldException 標出欄位，多筆編輯會用到。 */
     void fill(String userId, Transaction t, TransactionRequest req) {
+        fill(userId, t, req, lookup(userId));
+    }
+
+    /**
+     * 查帳戶與分類的方式。一般記帳逐筆查資料庫；匯入、還原等大量資料改用 {@link #cached} 先載入全部，避免上萬次查詢。
+     * 找不到時丟出與逐筆查詢相同的 404 訊息。
+     */
+    interface Lookup {
+        Account account(String id);
+        Category category(String id);
+        Category system(String kind, String key);
+    }
+
+    Lookup lookup(String userId) {
+        return new Lookup() {
+            public Account account(String id) { return accounts.get(userId, id); }
+            public Category category(String id) { return categories.get(userId, id); }
+            public Category system(String kind, String key) { return categories.system(userId, kind, key); }
+        };
+    }
+
+    /** 以記憶體中的清單查找（清單須已限定為同一個使用者） */
+    static Lookup cached(Collection<Account> accountList, Collection<Category> categoryList) {
+        Map<String, Account> acc = accountList.stream().collect(Collectors.toMap(a -> a.id, a -> a, (a, b) -> a));
+        Map<String, Category> cat = categoryList.stream().collect(Collectors.toMap(c -> c.id, c -> c, (a, b) -> a));
+        return new Lookup() {
+            public Account account(String id) {
+                Account a = id == null ? null : acc.get(id);
+                if (a == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "找不到此帳戶");
+                return a;
+            }
+            public Category category(String id) {
+                Category c = id == null ? null : cat.get(id);
+                if (c == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "找不到此分類");
+                return c;
+            }
+            public Category system(String kind, String key) {
+                return cat.values().stream().filter(c -> kind.equals(c.kind) && key.equals(c.systemKey)).findFirst()
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "缺少系統分類，請重新登入"));
+            }
+        };
+    }
+
+    void fill(String userId, Transaction t, TransactionRequest req, Lookup lk) {
         String kind = req.kind();
         if (!KINDS.contains(kind)) throw field("kind", bad("交易類型需為收入、支出或轉帳"));
         String date = on("date", () -> Dates.check(req.date(), "日期"));
-        Account from = on("account_id", () -> usable(userId, req.accountId(), date));
+        Account from = on("account_id", () -> usable(lk, req.accountId(), date));
 
         String title = req.title() == null ? "" : req.title().trim();
         if (title.isEmpty() && Transaction.TRANSFER.equals(kind)) title = "轉帳";
@@ -153,7 +197,7 @@ public class TransactionService {
         String categoryId = null;
         List<Entry> entries;
         if (Transaction.TRANSFER.equals(kind)) {
-            Account to = on("to_account_id", () -> usable(userId, req.toAccountId(), date));
+            Account to = on("to_account_id", () -> usable(lk, req.toAccountId(), date));
             if (to.id.equals(from.id)) throw field("to_account_id", bad("轉出與轉入帳戶不能相同"));
             BigDecimal toAmount;
             if (from.currency.equals(to.currency)) {
@@ -168,14 +212,14 @@ public class TransactionService {
             if (req.fee() != null && req.fee().signum() != 0) {
                 fee = on("fee", () -> Currencies.check(req.fee(), from.currency, true, "手續費"));
                 Category fc = on("fee", () -> req.feeCategoryId() == null || req.feeCategoryId().isBlank()
-                        ? categories.system(userId, Category.EXPENSE, Category.SYS_FEE)
-                        : categories.get(userId, req.feeCategoryId()));
+                        ? lk.system(Category.EXPENSE, Category.SYS_FEE)
+                        : lk.category(req.feeCategoryId()));
                 if (!Category.EXPENSE.equals(fc.kind)) throw field("fee", bad("手續費分類必須是支出分類"));
                 feeCategoryId = fc.id;
             }
             entries = buildTransferEntries(from.id, amount, to.id, toAmount, fee, feeCategoryId);
         } else {
-            Category c = on("category_id", () -> categories.get(userId, req.categoryId()));
+            Category c = on("category_id", () -> lk.category(req.categoryId()));
             if (!kind.equals(c.kind)) throw field("category_id", bad("分類「" + c.name + "」不是" + kindLabel(kind) + "分類"));
             categoryId = c.id;
             entries = List.of(buildMainEntry(kind, from.id, amount));
@@ -219,9 +263,9 @@ public class TransactionService {
     }
 
     /** 自己的、未封存的帳戶，且日期不早於開戶日期（SA FR-2.7） */
-    private Account usable(String userId, String accountId, String date) {
+    private static Account usable(Lookup lk, String accountId, String date) {
         if (accountId == null || accountId.isBlank()) throw bad("請選擇帳戶");
-        Account a = accounts.get(userId, accountId);
+        Account a = lk.account(accountId);
         if (a.archivedAt != null) throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, "帳戶「" + a.name + "」已封存，不能記帳");
         if (a.openingDate != null && date.compareTo(a.openingDate) < 0) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
@@ -252,17 +296,25 @@ public class TransactionService {
     }
 
     /** 明細（SA FR-3.4、3.5）：篩選、摘要、每日小計（依幣別），再分頁 */
+    /** 依篩選條件查出全部交易（新到舊），明細列表與 CSV 匯出共用 */
+    public List<Transaction> search(String userId, String from, String to, List<String> kinds, List<String> accountIds,
+                                    List<String> categoryIds, List<String> tags, String q) {
+        if (from != null) Dates.check(from, "起始日期");
+        if (to != null) Dates.check(to, "結束日期");
+        // 帳戶、分類先確認是自己的，再展開子分類
+        List<String> accIds = accountIds == null ? List.of() : accountIds.stream().map(id -> accounts.get(userId, id).id).toList();
+        List<String> catIds = categoryIds == null ? List.of()
+                : categoryIds.stream().flatMap(id -> categories.withChildren(userId, id).stream()).distinct().toList();
+        return ledger.search(userId, new LedgerQueries.Filter(from, to, kinds, accIds, catIds, tags, q));
+    }
+
     public Page list(String userId, String from, String to, List<String> kinds, List<String> accountIds,
                      List<String> categoryIds, List<String> tags, String q, int page, int size) {
         if (from != null) Dates.check(from, "起始日期");
         if (to != null) Dates.check(to, "結束日期");
         if (size < 1 || size > MAX_PAGE_SIZE) throw bad("每頁筆數需為 1～" + MAX_PAGE_SIZE);
         if (page < 0) throw bad("頁碼不能是負數");
-        // 帳戶、分類先確認是自己的，再展開子分類
-        List<String> accIds = accountIds == null ? List.of() : accountIds.stream().map(id -> accounts.get(userId, id).id).toList();
-        List<String> catIds = categoryIds == null ? List.of()
-                : categoryIds.stream().flatMap(id -> categories.withChildren(userId, id).stream()).distinct().toList();
-        List<Transaction> all = ledger.search(userId, new LedgerQueries.Filter(from, to, kinds, accIds, catIds, tags, q));
+        List<Transaction> all = search(userId, from, to, kinds, accountIds, categoryIds, tags, q);
 
         Map<String, String> currencyOf = currencyMap(userId);
         Map<String, Totals> summary = new TreeMap<>();
