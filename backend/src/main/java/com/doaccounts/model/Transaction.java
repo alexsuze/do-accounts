@@ -28,6 +28,8 @@ public class Transaction {
     public static final String ROLE_TRANSFER_OUT = "transfer_out";
     public static final String ROLE_TRANSFER_IN = "transfer_in";
     public static final String ROLE_FEE = "fee";
+    /** 投資買進、賣出的交割現金（不計入收支）；現金股利與投資費用用 main，才會計入收支（SD 2.6） */
+    public static final String ROLE_SETTLEMENT = "settlement";
 
     @Id
     public String id;
@@ -44,6 +46,8 @@ public class Transaction {
     public List<Entry> entries = new ArrayList<>();
     @Field("import_batch_id")
     public String importBatchId;
+    /** kind = investment 時的投資明細（SD 2.6） */
+    public Investment investment;
     /** 樂觀鎖（SD ADR-13） */
     @Version
     public Long version;
@@ -73,5 +77,33 @@ public class Transaction {
             this.role = role;
             this.categoryId = categoryId;
         }
+    }
+
+    /** 投資交易明細。金額都是證券幣別；交割現金在 entries（帳戶幣別） */
+    public static class Investment {
+        public static final String BUY = "buy";
+        public static final String SELL = "sell";
+        public static final String CASH_DIVIDEND = "cash_dividend";
+        public static final String STOCK_DIVIDEND = "stock_dividend";
+        public static final String SPLIT = "split";
+        public static final String FEE = "fee";
+
+        /** 持有證券的投資帳戶 */
+        @Field("account_id")
+        public String accountId;
+        @Field("security_id")
+        public String securityId;
+        @Field("trade_type")
+        public String tradeType;
+        /** 股數（買、賣、股票股利）；現金股利為參與配息的股數；分割為比例（1 股變幾股） */
+        @Field(targetType = FieldType.DECIMAL128)
+        public BigDecimal quantity;
+        /** 成交價；現金股利為每股配息 */
+        @Field(targetType = FieldType.DECIMAL128)
+        public BigDecimal price;
+        @Field(targetType = FieldType.DECIMAL128)
+        public BigDecimal fee;
+        @Field(targetType = FieldType.DECIMAL128)
+        public BigDecimal tax;
     }
 }

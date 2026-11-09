@@ -1,8 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { authToken, loadSession } from '../services/session'
 
-const soon = (title, stage) => ({ component: () => import('../pages/ComingSoonPage.vue'), meta: { title, stage } })
-
 // 使用 hash 模式，避免 GitHub Pages 子路徑重新整理 404（SD 5.1）
 const routes = [
   { path: '/login', name: 'login', component: () => import('../pages/LoginPage.vue'), meta: { public: true } },
@@ -18,7 +16,7 @@ const routes = [
       { path: 'categories', name: 'categories', component: () => import('../pages/CategoriesPage.vue'), meta: { title: '分類' } },
       { path: 'budgets', name: 'budgets', component: () => import('../pages/BudgetsPage.vue'), meta: { title: '預算' } },
       { path: 'reports', name: 'reports', component: () => import('../pages/ReportsPage.vue'), meta: { title: '報表' } },
-      { path: 'investments', name: 'investments', ...soon('投資', 4) },
+      { path: 'investments', name: 'investments', component: () => import('../pages/InvestmentsPage.vue'), meta: { title: '投資' } },
       { path: 'import', name: 'import', component: () => import('../pages/ImportPage.vue'), meta: { title: '匯入匯出' } },
       { path: 'settings', name: 'settings', component: () => import('../pages/SettingsPage.vue'), meta: { title: '設定' } },
       { path: 'admin', name: 'admin', component: () => import('../pages/AdminPage.vue'), meta: { title: '管理', admin: true } }

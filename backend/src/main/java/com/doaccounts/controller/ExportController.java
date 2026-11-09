@@ -5,6 +5,10 @@ import com.doaccounts.model.User;
 import com.doaccounts.service.BackupService;
 import com.doaccounts.service.Dates;
 import com.doaccounts.service.ExportService;
+import com.doaccounts.service.InvestmentService;
+import com.doaccounts.model.Security;
+import java.util.HashMap;
+import java.util.Map;
 import com.doaccounts.service.TransactionService;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -28,11 +32,30 @@ public class ExportController {
     private final TransactionService transactions;
     private final ExportService export;
     private final BackupService backup;
+    private final InvestmentService investments;
 
-    public ExportController(TransactionService transactions, ExportService export, BackupService backup) {
+    public ExportController(TransactionService transactions, ExportService export, BackupService backup, InvestmentService investments) {
         this.transactions = transactions;
         this.export = export;
         this.backup = backup;
+        this.investments = investments;
+    }
+
+    /** 投資交易 CSV（舊到新） */
+    @GetMapping("/trades")
+    public ResponseEntity<StreamingResponseBody> trades(@RequestAttribute(AuthFilter.USER) User user,
+                                                        @RequestParam(name = "account_id", required = false) String accountId) {
+        var page = investments.trades(user.id, accountId, null, null, null, 0, Integer.MAX_VALUE);
+        var list = page.items().reversed();
+        Map<String, Security> secs = new HashMap<>();
+        list.forEach(r -> { if (r.security() != null) secs.put(r.security().id, r.security()); });
+        var txs = list.stream().map(InvestmentService.TradeRow::transaction).toList();
+        StreamingResponseBody body = out -> export.writeTradesCsv(user.id, txs, secs, out);
+        String name = "do-accounts-投資交易-" + Dates.today() + ".csv";
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(name, StandardCharsets.UTF_8).build().toString())
+                .body(body);
     }
 
     /** 舊到新寫出，方便在 Excel 依日期閱讀 */

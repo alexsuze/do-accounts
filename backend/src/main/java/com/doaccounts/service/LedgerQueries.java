@@ -72,8 +72,15 @@ public class LedgerQueries {
 
     public record AccountMonth(String accountId, String month, BigDecimal sum) {}
 
+    /** 有分錄，或是投資交易的持有帳戶（股票股利、分割沒有現金分錄） */
     public boolean hasTransactions(String userId, String accountId) {
-        return mongo.exists(Query.query(where("user_id").is(userId).and("entries.account_id").is(accountId)), Transaction.class);
+        return mongo.exists(Query.query(where("user_id").is(userId).orOperator(
+                where("entries.account_id").is(accountId), where("investment.account_id").is(accountId))), Transaction.class);
+    }
+
+    /** 某使用者全部的投資交易（持倉計算），舊到新 */
+    public List<Transaction> investments(String userId) {
+        return mongo.find(Query.query(where("user_id").is(userId).and("kind").is(Transaction.INVESTMENT)).with(OLDEST_FIRST), Transaction.class);
     }
 
     /** 該帳戶最早一筆交易的日期 */

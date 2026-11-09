@@ -6,6 +6,8 @@ import com.doaccounts.model.Category;
 import com.doaccounts.model.ExchangeRate;
 import com.doaccounts.model.ImportBatch;
 import com.doaccounts.model.ImportTemplate;
+import com.doaccounts.model.Price;
+import com.doaccounts.model.Security;
 import com.doaccounts.model.Transaction;
 import com.doaccounts.model.User;
 import org.slf4j.Logger;
@@ -63,5 +65,9 @@ public class IndexInitializer {
         mongo.indexOps(ImportBatch.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("created_at", Sort.Direction.DESC));
         mongo.indexOps(ImportTemplate.class).createIndex(new Index().on("user_id", Sort.Direction.ASC));
         mongo.indexOps(Transaction.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("import_batch_id", Sort.Direction.ASC).sparse());
+        // SD 2.6：證券、報價、投資交易
+        mongo.indexOps(Security.class).createIndex(new Index().on("market", Sort.Direction.ASC).on("symbol", Sort.Direction.ASC).unique());
+        mongo.indexOps(Price.class).createIndex(new Index().on("security_id", Sort.Direction.ASC).on("date", Sort.Direction.ASC).on("user_id", Sort.Direction.ASC).unique());
+        mongo.indexOps(Transaction.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("kind", Sort.Direction.ASC).on("date", Sort.Direction.ASC));
     }
 }

@@ -95,16 +95,16 @@ class ExportBackupTest {
         f.users.add(other);
         assertThrows(ResponseStatusException.class, () -> f.backupService.restore(other, null));
         var good = f.backupService.export(f.me);
-        var wrongFormat = new BackupService.Backup("x", 1, null, "TWD", null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        var wrongFormat = new BackupService.Backup("x", 1, null, "TWD", null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null);
         assertThrows(ResponseStatusException.class, () -> f.backupService.restore(other, wrongFormat));
-        var future = new BackupService.Backup(BackupService.FORMAT, 99, null, "TWD", null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        var future = new BackupService.Backup(BackupService.FORMAT, 99, null, "TWD", null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null);
         assertThrows(ResponseStatusException.class, () -> f.backupService.restore(other, future));
         Transaction orphan = new Transaction();
         orphan.title = "孤兒";
         orphan.date = "2026-11-01";
         orphan.entries = List.of(new Transaction.Entry("不存在", new BigDecimal("-1"), Transaction.ROLE_MAIN, null));
         var broken = new BackupService.Backup(BackupService.FORMAT, 1, null, "TWD", null, good.accounts(), good.categories(),
-                List.of(orphan), List.of(), List.of(), List.of());
+                List.of(orphan), List.of(), List.of(), List.of(), null);
         var ex = assertThrows(ResponseStatusException.class, () -> f.backupService.restore(other, broken));
         assertTrue(ex.getReason().contains("帳戶不存在"));
         assertTrue(f.accounts.stream().noneMatch(a -> a.userId.equals(OTHER)), "檢查失敗時不動任何資料");
