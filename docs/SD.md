@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | 0.4 |
+| 文件版本 | 0.5 |
 | 系統版本 | 2.0.0（規劃中） |
 | 撰寫日期 | 2026-11-09 |
 | 文件性質 | 系統設計（SD） |
@@ -13,6 +13,8 @@
 
 > v0.2 變更：後端改為 Java（Spring Boot），整體技術架構比照 to-do-schedule。
 > 資料庫因此改回 MongoDB Atlas，登入改為 Google 登入＋管理員核准。
+> v0.5 變更：階段 3 實作——CSV 改在瀏覽器解析、取消 import_previews（2.9、4.7、ADR-17）、匯入匯出與備份 API 格式（3.10）。
+>
 > v0.4 變更：階段 2 實作——預算停止標記（2.7）、匯率以 TWD 為中介與來源改為 currency-api 鏡像（2.8、4.4）、預算／報表／匯率 API 回傳格式（3.6～3.8）、圖表改用自製 SVG（ADR-15、16）。
 >
 > v0.3 變更：頁面示意圖定案，UI 採 **Tailwind CSS v4 ＋ Reka UI**（不使用 Quasar），見 1.5 與第 5 章。
@@ -70,11 +72,11 @@ graph TB
 | 拖曳 | vuedraggable | 相同 | 帳戶、分類排序 |
 | 圖表 | 自製 SVG 元件（`components/charts/`） | **新增** | 依示意圖繪製，顏色直接用 CSS 變數，深淺色自動切換（ADR-15） |
 | 金額計算（前端） | decimal.js-light | **新增** | 表單即時計算、加總顯示 |
-| CSV 解析（前端預覽） | papaparse | **新增** | 匯入時預覽前 20 列 |
+| CSV 解析 | 自寫解析（`utils/csv.js`）＋ 瀏覽器 `TextDecoder`（UTF-8／Big5） | **新增** | 不引入套件；與貼上共用同一個解析器（ADR-17） |
 | 後端語言 | Java 21 | 相同 | |
 | 後端框架 | Spring Boot 4.1.x（webmvc、data-mongodb、validation、actuator） | 相同 | |
 | 建置工具 | Maven Wrapper（`./mvnw`） | 相同 | 本機不需另裝 Maven |
-| CSV（後端） | Apache Commons CSV | **新增** | 匯出、匯入完整解析；Big5 用 Java 內建 Charset |
+| CSV（後端） | 只負責匯出（自寫，`ExportService`） | **新增** | 匯入的解析在前端（ADR-17） |
 | 外部 HTTP | Spring `RestClient` | 相同 | Google、匯率、報價 |
 | 排程 | `@EnableScheduling` ＋ `@Scheduled(zone = "Asia/Taipei")` | 相同 | |
 | 資料庫 | MongoDB Atlas 免費層 | 相同 | |
@@ -332,11 +334,11 @@ db.transactions.aggregate([
 
 ### 2.9 匯入相關
 
-**import_batches**：`_id, user_id, file_name, row_count, imported_count, skipped_count, status (completed / failed / reverted), created_at, reverted_at`
+**import_batches**：`_id, user_id, file_name, row_count, imported_count, skipped_count, created_categories (string[]), status (completed / failed / reverted), created_at, reverted_at, reverted_count`；索引 `{ user_id, created_at: -1 }`。匯入的交易帶 `import_batch_id`（索引 `{ user_id, import_batch_id }`，sparse）。
 
-**import_templates**：`_id, user_id, name, mapping`（object：欄位對應、日期格式、金額正負規則、預設帳戶、編碼）
+**import_templates**：`_id, user_id, name, mapping, updated_at`。`mapping` 由前端定義、後端只保存：`{ by_header: { CSV 標題: 欄位 }, amount_rule: signed / split / positive_expense, date_order: ymd / mdy / dmy, default_account_id }`。內建範本「do-accounts 格式」寫在前端（`utils/importer.js`），不存資料庫。
 
-**import_previews**：`_id, user_id, rows (array), expire_at`；TTL 索引 `{ expire_at: 1 }, expireAfterSeconds: 0`，30 分鐘後由 MongoDB 自動刪除。
+不另存預覽（原規劃的 `import_previews` 取消，ADR-17）：預覽與確認都把整理好的資料列送到後端重新計算。
 
 ### 2.10 容量估算
 
@@ -505,14 +507,15 @@ public record TransactionRequest(
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| POST | `/api/import/transactions/preview` | multipart：`file` ＋ `mapping`（JSON）→ `{ preview_id, rows[{ line, status: ok/duplicate/error, message, parsed }], missing_accounts, missing_categories }` |
-| POST | `/api/import/transactions/commit` | `{ preview_id, skip_lines, create_missing }` → ImportBatch |
-| GET | `/api/import/batches` | 匯入紀錄 |
-| POST | `/api/import/batches/{id}/revert` | 整批撤銷 |
-| GET / POST / PUT / DELETE | `/api/import/templates[/{id}]` | 匯入範本 |
-| POST | `/api/import/trades/preview`、`/commit` | 投資交易匯入 |
-| GET | `/api/export/backup` | 完整 JSON 備份下載 |
-| POST | `/api/import/backup` | 從 JSON 還原（只限還沒有任何交易的帳號） |
+| POST | `/api/import/transactions/preview` | `{ file_name, rows: [{ line, date, kind, title, category, account, amount, to_account, to_amount, fee, note, tags }], default_account_id, account_map: { 名稱: 帳戶 id }, category_map: { "kind|名稱": 分類 id 或 "__create__" } }` → `{ total, ok, duplicate, error, rows: [{ line, status: ok/duplicate/error, field, message, new_category }], missing_accounts: [{ name, rows, mapped_to }], missing_categories: [{ key, kind, name, rows, mapped_to }] }`；最多 10,000 列 |
+| POST | `/api/import/transactions/commit` | 同上，加 `lines`（要匯入的列號）→ ImportBatch；錯誤的列一律略過；勾選的重複列照樣匯入 |
+| GET | `/api/import/batches` | 最近 20 次匯入紀錄 |
+| POST | `/api/import/batches/{id}/revert` | 整批撤銷（刪除該批次全部交易，含匯入後修改過的；自動新增的分類保留） |
+| GET / POST / PUT / DELETE | `/api/import/templates[/{id}]` | 匯入範本 `{ name, mapping }` |
+| POST | `/api/import/trades/preview`、`/commit` | 投資交易匯入（階段 4） |
+| GET | `/api/export/transactions?from&to&kind&account_id&category_id&tag&q` | 交易 CSV（篩選條件同明細列表），舊到新 |
+| GET | `/api/export/backup` | 完整 JSON 備份下載：`{ format: "do-accounts-backup", version: 1, exported_at, base_currency, settings, accounts, categories, transactions, budgets, manual_rates, import_templates }` |
+| POST | `/api/import/backup` | 從 JSON 還原（只限還沒有任何交易的帳號；先檢查參照完整，全部換成新 id 寫入；回傳各類筆數） |
 
 ---
 
@@ -735,23 +738,26 @@ sequenceDiagram
     participant DB as MongoDB
 
     U->>W: 選擇 CSV（≤ 5MB）
-    W->>W: papaparse 預覽前 20 列
-    U->>W: 設定欄位對應 / 套用範本
-    W->>A: POST /api/import/transactions/preview（multipart）
-    A->>A: Commons CSV 完整解析（UTF-8 / Big5）→ 逐列驗證 → 名稱對應帳戶 / 分類
-    A->>DB: 查詢可能重複的既有交易
-    A->>DB: 存入 import_previews（30 分鐘後 TTL 自動刪除）
-    A-->>W: 每列狀態、缺少的帳戶 / 分類
-    U->>W: 確認
+    W->>W: TextDecoder 解碼（UTF-8 失敗改 Big5）→ 判斷分隔符號 → 切欄位（utils/csv.js）
+    U->>W: 設定欄位對應 / 套用範本、日期格式、金額規則、預設帳戶
+    W->>W: 依對應整理成資料列（utils/importer.js，沿用貼上用的日期與金額解析）
+    W->>A: POST /api/import/transactions/preview（JSON）
+    A->>DB: 一次載入帳戶、分類；查日期範圍內的既有交易（重複比對）
+    A-->>W: 每列狀態、找不到的帳戶 / 分類
+    U->>W: 指定對應或新增分類、調整勾選
     W->>A: POST /api/import/transactions/commit
-    A->>DB: 建立缺少的帳戶 / 分類 → insert import_batches → 每 500 筆 insertMany transactions
+    A->>A: 重新檢查全部資料列
+    A->>DB: 新增需要的分類 → insert import_batches → 每 500 筆 insertMany transactions
     A-->>W: 匯入結果
 ```
 
-- 重複判斷：同 `date` ＋ 同帳戶 ＋ 同金額，且 `title` 去除空白後相同或互相包含。
-- 金額正負規則：「單一金額欄，負數是支出」或「收入欄、支出欄分開」。
+- 每一列都經過與手動記帳相同的檢查（`TransactionService.fill`），帳戶與分類先一次載入記憶體（`TransactionService.cached`），一萬列也不需要上萬次資料庫查詢。
+- 名稱比對：帳戶名稱去除空白、不分大小寫後相同；分類可寫「大類 › 子類」（`>` 也可以）或單一名稱（先找大類，再找唯一同名的子類）；空白分類用該類型的「其他」。找不到的**分類**可選「新增」（「大類 › 子類」時大類不存在也一併新增）；找不到的**帳戶**必須對應到既有帳戶（新帳戶需要幣別、開戶日期與初始餘額，請先在帳戶頁建立）。
+- 沒有項目名稱時，用分類名稱當項目。
+- 重複判斷：同 `date` ＋ 同帳戶 ＋ 同金額（帶正負號，轉帳比轉出分錄），且 `title` 去除空白後相同或互相包含。只與資料庫既有交易比對，同一個檔案裡的相同兩列不算重複（例如同一天買兩杯一樣的咖啡）。
+- 金額正負規則：「單一金額欄，負數是支出」、「收入欄、支出欄分開」或「單一欄，正數為支出」（信用卡帳單）；有「類型」欄時以類型為準、金額取絕對值；有轉入帳戶時視為轉帳。
 - **寫入失敗的補償**：MongoDB 這裡不使用多文件交易，所以中途失敗時，直接刪除該 `import_batch_id` 已寫入的交易，並把批次標記為 `failed`。批次撤銷也是同一個動作：`deleteMany({ user_id, import_batch_id })`。
-- **匯出**：欄位 `日期, 類型, 項目, 大類, 子類, 帳戶, 金額, 幣別, 轉入帳戶, 轉入金額, 標籤, 備註`；UTF-8 with BOM；用 `StreamingResponseBody` 邊查邊寫；開頭為 `= + - @` 的儲存格加 `'` 前綴，防止 CSV injection。這個格式可以直接再匯入（內建範本「do-accounts 格式」）。
+- **匯出**：欄位 `日期, 類型, 項目, 大類, 子類, 帳戶, 金額, 幣別, 轉入帳戶, 轉入金額, 手續費, 標籤, 備註`；金額支出為負、收入與轉帳為正；UTF-8 with BOM；`StreamingResponseBody` 寫出；文字欄位開頭為 `= + - @` 時加 `'` 前綴，防止 CSV injection（匯入時自動去掉）。這個格式可以直接再匯入（內建範本「do-accounts 格式」）。
 
 ### 4.8 前端計算機（沿用舊版 money）
 
@@ -1080,4 +1086,5 @@ spring.servlet.multipart.max-file-size=5MB
 | ADR-13 | 交易加 `version` 樂觀鎖 | 表格模式會先載入再修改，中間可能被其他分頁或裝置改過；有版本號才能偵測並拒絕覆蓋 | 單筆編輯也必須帶 `version`；前端要保存載入時的版本 |
 | ADR-15 | 圖表用自製 SVG 元件，不用 Chart.js | 示意圖的圖表都是簡單的長條、折線、環形；SVG 可完全照示意圖畫，顏色直接用 CSS 變數；不增加約 200 KB 的套件 | 沒有內建的互動（縮放、圖例切換）；提示用 `<title>`；之後若需要複雜圖表再引入 |
 | ADR-16 | 匯率以 TWD 為中介保存 | 免費來源以 TWD 為基準最完整；只存一份就能支援任何本位幣（交叉匯率） | 本位幣不是 TWD 時換算多一次除法；手動匯率也以 TWD 表示 |
+| ADR-17 | CSV 在瀏覽器解析，後端只收整理好的資料列；不暫存預覽 | 沿用表格模式貼上已有的日期、金額、民國年解析；`TextDecoder` 原生支援 Big5；調整欄位對應能立即看到結果；後端不需要 multipart 與暫存集合，確認時重新檢查即可 | 一萬列的 JSON 約 1～2 MB；檢查規則仍全部在後端，前端解析錯誤只會變成後端回報的錯誤列 |
 | ADR-14 | 多筆儲存採「先全部檢查、再寫入、失敗補償」，不使用 MongoDB 多文件交易 | 與 ADR-02 一致，不必設定 `MongoTransactionManager`，本機獨立 MongoDB 也能開發；檢查都在寫入前完成，寫入階段失敗的機率很低 | 補償不是真正的交易：在補償完成前的極短時間內，其他請求可能看到一半的結果；補償失敗需依日誌人工還原。若之後要更嚴格，Atlas 支援多文件交易，可在此服務加上 `@Transactional` |

@@ -157,6 +157,21 @@ public class LedgerQueries {
         mongo.insert(original);
     }
 
+    /** 刪除某次匯入的全部交易（整批撤銷、匯入失敗補償，SD 4.7），回傳刪除筆數 */
+    public long removeByBatch(String userId, String batchId) {
+        return mongo.remove(Query.query(where("user_id").is(userId).and("import_batch_id").is(batchId)), Transaction.class).getDeletedCount();
+    }
+
+    /** 該使用者是否有任何交易（JSON 還原只限空帳號） */
+    public boolean hasAny(String userId) {
+        return mongo.exists(Query.query(where("user_id").is(userId)), Transaction.class);
+    }
+
+    /** 某使用者的全部交易，舊到新（備份、匯出） */
+    public List<Transaction> all(String userId) {
+        return mongo.find(Query.query(where("user_id").is(userId)).with(OLDEST_FIRST), Transaction.class);
+    }
+
     /** 補償用：刪掉這次新增的文件 */
     public void removeByIds(String userId, Collection<String> ids) {
         if (ids.isEmpty()) return;

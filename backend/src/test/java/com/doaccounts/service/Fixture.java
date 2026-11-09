@@ -3,12 +3,17 @@ package com.doaccounts.service;
 import com.doaccounts.model.Account;
 import com.doaccounts.model.Budget;
 import com.doaccounts.model.ExchangeRate;
+import com.doaccounts.model.ImportBatch;
+import com.doaccounts.model.ImportTemplate;
 import com.doaccounts.model.User;
 import com.doaccounts.model.Category;
 import com.doaccounts.model.Transaction;
 import com.doaccounts.repository.AccountRepository;
 import com.doaccounts.repository.BudgetRepository;
 import com.doaccounts.repository.ExchangeRateRepository;
+import com.doaccounts.repository.ImportBatchRepository;
+import com.doaccounts.repository.ImportTemplateRepository;
+import com.doaccounts.repository.UserRepository;
 import com.doaccounts.repository.CategoryRepository;
 import com.doaccounts.repository.TransactionRepository;
 import com.doaccounts.service.AccountService.AccountRequest;
@@ -25,6 +30,7 @@ import java.util.Optional;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -44,6 +50,9 @@ class Fixture {
     final List<Transaction> transactions = new ArrayList<>();
     final List<Budget> budgets = new ArrayList<>();
     final List<ExchangeRate> rates = new ArrayList<>();
+    final List<ImportBatch> importBatches = new ArrayList<>();
+    final List<ImportTemplate> templates = new ArrayList<>();
+    final List<User> users = new ArrayList<>();
 
     final AccountRepository accountRepo = mock(AccountRepository.class);
     final CategoryRepository categoryRepo = mock(CategoryRepository.class);
@@ -51,6 +60,9 @@ class Fixture {
     final LedgerQueries ledger = mock(LedgerQueries.class);
     final BudgetRepository budgetRepo = mock(BudgetRepository.class);
     final ExchangeRateRepository fxRepo = mock(ExchangeRateRepository.class);
+    final ImportBatchRepository batchRepo = mock(ImportBatchRepository.class);
+    final ImportTemplateRepository templateRepo = mock(ImportTemplateRepository.class);
+    final UserRepository userRepo = mock(UserRepository.class);
 
     final AccountService accountService = new AccountService(accountRepo, ledger);
     final CategoryService categoryService = new CategoryService(categoryRepo, ledger);
@@ -61,8 +73,16 @@ class Fixture {
     final ReportService reportService = new ReportService(accountService, categoryService, ledger, fxService, budgetService);
     final DashboardService dashboardService = new DashboardService(accountService, ledger, fxService, budgetService);
 
+    final ImportService importService = new ImportService(txRepo, ledger, txService, accountService, categoryService, batchRepo, templateRepo);
+    final ExportService exportService = new ExportService(accountService, categoryService);
+    final BackupService backupService = new BackupService(userRepo, accountRepo, categoryRepo, txRepo, budgetRepo, fxRepo, templateRepo, ledger, categoryService);
+
     /** 本位幣 TWD 的使用者 */
     final User me = user(ME);
+
+    {
+        users.add(me);
+    }
 
     private int seq;
 
@@ -127,6 +147,39 @@ class Fixture {
             return null;
         }).when(ledger).removeByIds(anyString(), anyCollection());
         when(ledger.recent(anyString(), anyInt())).thenAnswer(inv -> newestFirst(mine(inv.getArgument(0))).stream().limit((int) inv.getArgument(1)).toList());
+        when(txRepo.saveAll(anyList())).thenAnswer(inv -> {
+            List<Transaction> list = inv.getArgument(0);
+            if (failSaveAll) throw new IllegalStateException("模擬寫入失敗");
+            list.forEach(t -> txRepo.save(t));
+            return list;
+        });
+        when(accountRepo.saveAll(anyList())).thenAnswer(inv -> { List<Account> l = inv.getArgument(0); l.forEach(this::upsertAccount); return l; });
+        doAnswer(inv -> { accounts.removeAll(List.copyOf((Collection<?>) inv.getArgument(0))); return null; }).when(accountRepo).deleteAll(anyCollection());
+        when(categoryRepo.saveAll(anyList())).thenAnswer(inv -> { List<Category> l = inv.getArgument(0); l.forEach(c -> { categories.removeIf(x -> x.id.equals(c.id)); categories.add(c); }); return l; });
+        when(budgetRepo.findByUserId(anyString())).thenAnswer(inv -> budgets.stream().filter(b -> b.userId.equals(inv.getArgument(0))).toList());
+        when(budgetRepo.saveAll(anyList())).thenAnswer(inv -> { List<Budget> l = inv.getArgument(0); l.forEach(b -> store(budgets, b, "b")); return l; });
+        doAnswer(inv -> { budgets.removeAll(List.copyOf((Collection<?>) inv.getArgument(0))); return null; }).when(budgetRepo).deleteAll(anyCollection());
+        when(fxRepo.saveAll(anyList())).thenAnswer(inv -> { List<ExchangeRate> l = inv.getArgument(0); l.forEach(r -> store(rates, r, "r")); return l; });
+        doAnswer(inv -> { rates.removeAll(List.copyOf((Collection<?>) inv.getArgument(0))); return null; }).when(fxRepo).deleteAll(anyCollection());
+        when(batchRepo.save(any(ImportBatch.class))).thenAnswer(inv -> store(importBatches, inv.getArgument(0), "ib"));
+        when(batchRepo.findById(anyString())).thenAnswer(inv -> importBatches.stream().filter(b -> b.id.equals(inv.getArgument(0))).findFirst());
+        when(batchRepo.findTop20ByUserIdOrderByCreatedAtDesc(anyString())).thenAnswer(inv -> importBatches.stream().filter(b -> b.userId.equals(inv.getArgument(0))).toList());
+        when(templateRepo.save(any(ImportTemplate.class))).thenAnswer(inv -> store(templates, inv.getArgument(0), "tp"));
+        when(templateRepo.findById(anyString())).thenAnswer(inv -> templates.stream().filter(t -> t.id.equals(inv.getArgument(0))).findFirst());
+        when(templateRepo.findByUserIdOrderByNameAsc(anyString())).thenAnswer(inv -> templates.stream().filter(t -> t.userId.equals(inv.getArgument(0))).toList());
+        when(templateRepo.saveAll(anyList())).thenAnswer(inv -> { List<ImportTemplate> l = inv.getArgument(0); l.forEach(t -> store(templates, t, "tp")); return l; });
+        doAnswer(inv -> templates.remove((ImportTemplate) inv.getArgument(0))).when(templateRepo).delete(any(ImportTemplate.class));
+        doAnswer(inv -> { templates.removeAll(List.copyOf((Collection<?>) inv.getArgument(0))); return null; }).when(templateRepo).deleteAll(anyCollection());
+        when(userRepo.findById(anyString())).thenAnswer(inv -> users.stream().filter(u -> u.id.equals(inv.getArgument(0))).findFirst());
+        when(userRepo.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(ledger.removeByBatch(anyString(), anyString())).thenAnswer(inv -> {
+            long before = transactions.size();
+            transactions.removeIf(t -> t.userId.equals(inv.getArgument(0)) && inv.getArgument(1).equals(t.importBatchId));
+            return before - transactions.size();
+        });
+        when(ledger.hasAny(anyString())).thenAnswer(inv -> !mine(inv.getArgument(0)).isEmpty());
+        when(ledger.all(anyString())).thenAnswer(inv -> mine(inv.getArgument(0)).stream().sorted((a, b) -> a.date.compareTo(b.date)).toList());
+
         when(budgetRepo.save(any(Budget.class))).thenAnswer(inv -> store(budgets, inv.getArgument(0), "b"));
         when(budgetRepo.findByUserIdAndMonthLessThanEqual(anyString(), anyString())).thenAnswer(inv -> budgets.stream()
                 .filter(b -> b.userId.equals(inv.getArgument(0)) && b.month.compareTo(inv.getArgument(1)) <= 0).toList());
@@ -158,10 +211,23 @@ class Fixture {
                 .filter(t -> t.title.startsWith(inv.getArgument(1))).toList());
     }
 
+    /** 設成 true 讓 txRepo.saveAll 失敗（測試補償） */
+    boolean failSaveAll;
+
+    private void upsertAccount(Account a) {
+        accounts.removeIf(x -> x.id.equals(a.id));
+        accounts.add(a);
+    }
+
     private <T> T store(List<T> list, T obj, String prefix) {
         try {
             var f = obj.getClass().getField("id");
-            if (f.get(obj) == null) { f.set(obj, prefix + (++seq)); list.add(obj); }
+            if (f.get(obj) == null) { f.set(obj, prefix + (++seq)); list.add(obj); } else if (!list.contains(obj)) {
+                Object id = f.get(obj);
+                boolean exists = false;
+                for (T x : list) if (id.equals(f.get(x))) exists = true;
+                if (!exists) list.add(obj); // 預先指定 id 的新文件（還原備份）
+            }
             return obj;
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
