@@ -4,6 +4,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -11,7 +12,11 @@ import java.util.Map;
  */
 public final class Currencies {
 
+    /** 匯率以新台幣為中介保存（SD 2.8）：其他幣別都存「1 單位 = ? TWD」 */
+    public static final String PIVOT = "TWD";
     private static final Map<String, Integer> DIGITS = Map.of("TWD", 0, "JPY", 0, "USD", 2);
+    /** 固定順序，給畫面與匯率排程使用 */
+    public static final List<String> CODES = List.of("TWD", "USD", "JPY");
     /** 金額上限（絕對值），擋掉打錯的天文數字 */
     private static final BigDecimal MAX = new BigDecimal("1000000000000");
 
@@ -19,6 +24,11 @@ public final class Currencies {
 
     public static boolean supported(String code) {
         return code != null && DIGITS.containsKey(code);
+    }
+
+    /** 依幣別小數位數四捨五入（顯示用的最終數字） */
+    public static BigDecimal round(BigDecimal v, String code) {
+        return v.setScale(digits(code), java.math.RoundingMode.HALF_UP);
     }
 
     public static int digits(String code) {

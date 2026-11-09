@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | 0.3（草案，待確認） |
+| 文件版本 | 0.4 |
 | 系統版本 | 2.0.0（規劃中） |
 | 撰寫日期 | 2026-11-09 |
 | 文件性質 | 系統設計（SD） |
@@ -13,6 +13,8 @@
 
 > v0.2 變更：後端改為 Java（Spring Boot），整體技術架構比照 to-do-schedule。
 > 資料庫因此改回 MongoDB Atlas，登入改為 Google 登入＋管理員核准。
+> v0.4 變更：階段 2 實作——預算停止標記（2.7）、匯率以 TWD 為中介與來源改為 currency-api 鏡像（2.8、4.4）、預算／報表／匯率 API 回傳格式（3.6～3.8）、圖表改用自製 SVG（ADR-15、16）。
+>
 > v0.3 變更：頁面示意圖定案，UI 採 **Tailwind CSS v4 ＋ Reka UI**（不使用 Quasar），見 1.5 與第 5 章。
 > 帳務核心設計（交易＋分錄、精確金額、每日匯率）維持不變，改以 MongoDB 的方式實作，見第 2 章。
 
@@ -66,7 +68,7 @@ graph TB
 | 路由 | Vue Router，`createWebHashHistory` | 相同 | GitHub Pages 子路徑重新整理不會 404 |
 | HTTP | axios（`services/api.js` 統一 instance） | 相同 | 自動帶通行證、401 自動回登入頁、統一顯示錯誤 |
 | 拖曳 | vuedraggable | 相同 | 帳戶、分類排序 |
-| 圖表 | Chart.js ＋ vue-chartjs | **新增** | 舊版 money 已在用 |
+| 圖表 | 自製 SVG 元件（`components/charts/`） | **新增** | 依示意圖繪製，顏色直接用 CSS 變數，深淺色自動切換（ADR-15） |
 | 金額計算（前端） | decimal.js-light | **新增** | 表單即時計算、加總顯示 |
 | CSV 解析（前端預覽） | papaparse | **新增** | 匯入時預覽前 20 列 |
 | 後端語言 | Java 21 | 相同 | |
@@ -166,7 +168,7 @@ do-accounts/
 | status | string | `pending` 待核准 / `active` 使用中 / `disabled` 已停用 |
 | admin | boolean | `ADMIN_EMAIL` 的帳號登入時自動設為 true 並啟用 |
 | base_currency | string | 本位幣，預設 `TWD` |
-| settings | object | `{ week_start, budget_warn_pct, income_color_scheme, … }` |
+| settings | object | `{ week_start: mon/sun, budget_warn_pct: 1～100（預設 80） }`；舊文件沒有時用預設值。收支顏色存在瀏覽器（`do-accounts:pnl`） |
 | created_at / last_login_at | Date | |
 
 ### 2.3 accounts
@@ -305,8 +307,10 @@ db.transactions.aggregate([
 | user_id | string | |
 | month | string | `YYYY-MM` |
 | category_id | string / null | null = 當月總預算；只能是支出分類 |
-| amount | Decimal128 | 本位幣 |
+| amount | Decimal128 / null | 本位幣；**null 為「停止」標記**：從這個月起不再沿用之前的循環預算 |
 | recurring | boolean | 循環：之後沒有設定的月份沿用這一筆 |
+
+**有效預算**：某分類在 M 月的預算 = 月份 ≤ M 的紀錄中最新的一筆；同月直接使用，較早的月份只有 `recurring` 才沿用；`amount` 為 null 則沒有預算。沒有設總預算時，畫面以「大類預算＋大類沒設預算的子類預算」加總代替（`derived`）。
 
 唯一索引：`{ user_id, month, category_id }`。
 
@@ -318,11 +322,13 @@ db.transactions.aggregate([
 | date | string | `YYYY-MM-DD` |
 | currency | string | 例如 `USD` |
 | base | string | 例如 `TWD` |
-| rate | Decimal128 | 1 currency = rate base |
-| source | string | `fawazahmed0` / `frankfurter` / `seed` / `manual` |
+| rate | Decimal128 | 1 currency = rate base（`base` 固定為 TWD，見下方） |
+| source | string | `currency-api` / `currency-api-mirror` / `seed` / `manual` |
 | user_id | string / null | 手動覆寫時為該使用者；系統抓取的為 null（全站共用） |
 
-唯一索引：`{ date, currency, base, user_id }`。
+唯一索引：`{ date, currency, base, user_id }`；查詢索引 `{ currency, user_id, date }`。
+
+**一律以新台幣為中介保存**：資料庫只存「1 USD = ? TWD」「1 JPY = ? TWD」。使用者的本位幣不是 TWD 時，換算用交叉匯率 `rate(c → base) = twd(c) / twd(base)`，不必為每種本位幣各存一份。
 
 ### 2.9 匯入相關
 
@@ -454,28 +460,30 @@ public record TransactionRequest(
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/api/budgets?month=YYYY-MM` | 當月有效預算（含循環沿用），每筆含 `spent`、`remaining`、`percentage`、`projected` |
-| PUT | `/api/budgets` | Upsert `{ month, category_id, amount, recurring }` |
-| DELETE | `/api/budgets/{id}` | |
-| POST | `/api/budgets/copy` | `{ from_month, to_month }` |
+| GET | `/api/budgets?month=YYYY-MM` | `{ month, base_currency, warn_pct, days_in_month, days_elapsed, total, items, unbudgeted, history }`。`total`／`items[]` 每筆含 `amount`、`source_month`、`recurring`、`inherited`（沿用之前的循環）、`derived`（總預算由分類加總）、`spent`、`remaining`、`percentage`、`projected`（花費 ÷ 已過天數 × 當月天數；過去月份 = 實際花費）；`unbudgeted`：有花費但大類與子類都沒有預算的大類；`history`：近 6 個月的總預算與花費 |
+| PUT | `/api/budgets` | Upsert `{ month, category_id, amount, recurring }`（同月同分類覆蓋） |
+| DELETE | `/api/budgets?month=&category_id=` | 從這個月起移除：刪除當月設定；之前若有循環預算會沿用到這個月，就寫入停止標記（2.7） |
+| POST | `/api/budgets/copy` | `{ from_month, to_month }` → `{ copied }`；目標月份已自己設定的分類不覆蓋 |
 
 ### 3.7 報表 `/api/reports`
 
 | 方法 | 路徑 | 回傳 |
 |---|---|---|
-| GET | `/api/reports/dashboard` | 淨資產三數字、本月收支、最近 5 筆交易（預算概況於階段 2 加入）。**階段 1 尚無匯率**：淨資產與本月收支只計本位幣，外幣帳戶列在 `foreign_accounts`、外幣收支列在 `month_other_currencies`，階段 2 起依匯率換算併入 |
-| GET | `/api/reports/net-worth?from=YYYY-MM&to=YYYY-MM` | `[{ month, assets, liabilities, investments, net_worth }]` |
-| GET | `/api/reports/breakdown?from&to&kind` | 分類（含子類）金額與百分比 |
-| GET | `/api/reports/daily?month=` | `[{ date, income, expense }]` 與當月合計 |
-| GET | `/api/reports/category-trend?category_id&months=12` | `[{ month, amount }]` |
+| GET | `/api/reports/dashboard` | `{ base_currency, net_worth, assets, liabilities, rates_date, month, month_totals, budget: { warn_pct, total, top }, recent }`。外幣帳戶以最新匯率換算併入（`rates_date` 為所用匯率中最舊的日期，畫面標示）；本月收支依交易日匯率換算；`budget.top` 為使用率最高的 3 個分類預算 |
+| GET | `/api/reports/net-worth?months=12` | `{ base_currency, points: [{ month, assets, liabilities, investments, net_worth }] }`；`months` = 0 為全部期間（最多 240 個月）；不早於最早的開戶月份；`investments` 於階段 4 加入 |
+| GET | `/api/reports/breakdown?from&to&kind` | `{ total, items: [{ category_id, amount, percentage, children: [{ category_id, amount }] }] }`；金額為正數；直接記在大類本身的金額，在有其他子類時以大類 id 列為一個 child |
+| GET | `/api/reports/daily?month=` | `{ income, expense, average_expense（÷ 已過天數）, max_expense_day, days: [{ date, income, expense }] }` |
+| GET | `/api/reports/category-trend?category_id&months=12` | `{ kind, average（不含本月）, points: [{ month, amount, budget }] }`；含子類；`budget` 為當月有效預算（收入分類為 null） |
 
 ### 3.8 匯率 `/api/fx`
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/api/fx/latest` | 各支援幣別對本位幣的最新匯率與日期 |
-| GET | `/api/fx/history?currency&from&to` | |
-| PUT | `/api/fx/manual` | `{ date, currency, rate }` 手動覆寫（只影響自己） |
+| GET | `/api/fx/latest` | `[{ currency, rate, date, source, manual }]`，rate 為「1 幣別 = ? TWD」（2.8） |
+| GET | `/api/fx/history?currency&from&to` | 同上格式，舊到新；同一天手動值優先 |
+| GET | `/api/fx/manual` | 自己的手動匯率，新到舊 |
+| PUT | `/api/fx/manual` | `{ date, currency, rate }` 手動覆寫（只影響自己；同一天再設定是覆蓋） |
+| DELETE | `/api/fx/manual/{id}` | 移除自己的手動匯率 |
 
 ### 3.9 投資 `/api/investments`
 
@@ -652,7 +660,7 @@ batch(userId, req):
 flowchart LR
     J["Scheduled 每天 06:00、18:00（Asia/Taipei）"] --> P{主要來源<br/>fawazahmed0 currency-api}
     P -- 成功 --> S[upsert exchange_rates<br/>date = 今天]
-    P -- 失敗 --> B{備援來源<br/>frankfurter.app}
+    P -- 失敗 --> B{備援來源<br/>同一份資料的 Cloudflare 鏡像}
     B -- 成功 --> S
     B -- 失敗 --> L[記錄日誌，查詢時沿用最近一筆]
 ```
@@ -665,7 +673,9 @@ public interface FxService {
 }
 ```
 
-- 取「`date <= onDate` 中最新的一筆」，使用者的手動值優先。
+- 來源：fawazahmed0 currency-api（免金鑰）`cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/twd.json`，備援為官方鏡像 `latest.currency-api.pages.dev`。回應是「1 TWD = ? 外幣」，取倒數保存（8 位小數）。frankfurter.app 使用歐洲央行資料，**沒有新台幣**，不能當備援。
+- 啟動後背景檢查：今天還沒有抓到（不含初始值）就立刻抓一次；管理員可用 `POST /api/admin/jobs/fx` 手動執行。
+- 取「`date <= onDate` 中最新的一筆」，同一天使用者的手動值優先；更早都沒有時用最早的一筆（剛上線時歷史交易仍能換算）。完全沒有匯率時回 503「缺少 USD 匯率，請到設定頁手動輸入」。
 - 報表一次載入整段期間的匯率（`RateTable`），在記憶體中查找，避免逐筆查詢資料庫。
 - 啟動時如果某個幣別完全沒有匯率，就寫入內建的初始匯率（`source = seed`），確保第一次部署就能換算。
 - 本位幣與交易幣別相同時直接回傳 1。
@@ -918,8 +928,8 @@ sequenceDiagram
 | `TransactionGrid`、`TransactionCardList` | 表格模式（自建 `<table>`＋每格輸入框）／手機卡片清單 |
 | `TradeDialog`、`SecuritySearch` | 投資交易視窗 |
 | `HoldingsTable`、`AllocationBars` | 投資持倉 |
-| `BudgetRing`、`BudgetRow` | 預算 |
-| `NetWorthChart`、`BreakdownDonut`、`DailyBars`、`TrendLine` | 報表、總覽（Chart.js） |
+| `BudgetRing`、`BudgetBar`、`BudgetDialog` | 預算（總預算圓環、進度條含推估斜紋與時間線、新增／編輯對話框） |
+| `NetWorthChart`、`DonutChart`、`DailyBars`、`TrendLine`、`BalanceChart` | 報表、總覽（自製 SVG，計算在 `utils/charts.js`） |
 | `ImportWizard`、`ColumnMapper`、`ImportPreviewTable` | CSV 匯入 |
 | `CategoryTree`、`IconPicker`、`ColorPicker` | 分類管理 |
 
@@ -940,7 +950,7 @@ sequenceDiagram
 - 套用方式：在 `<html>` 加或移除 `dark` class。`index.html` 的 `<head>` 放一小段 inline script，在 Vue 載入前就套用，避免重新整理時畫面先白後黑的閃爍。
 - 「跟隨系統」時監聽 `matchMedia('(prefers-color-scheme: dark)')` 的變化。
 - 每頁右上角的 `ThemeToggle` 只在深色／淺色間切換；設定頁提供三個選項。
-- 圖表：Chart.js 的顏色從 CSS 變數讀取（`getComputedStyle`），主題切換時重新繪製。
+- 圖表：SVG 的 `fill`／`stroke` 直接寫 `var(--accent)` 等 CSS 變數，切換主題不需重新繪製。
 
 ### 5.8 無障礙
 
@@ -1068,4 +1078,6 @@ spring.servlet.multipart.max-file-size=5MB
 | ADR-11 | 不遷移舊版 money 資料 | 使用者已確認從零開始 | 之後若需要，可寫腳本：舊 MongoDB → JSON 備份格式 → 用備份還原 |
 | ADR-12 | UI 採 Tailwind CSS v4 ＋ Reka UI，不用 Quasar | 先做示意圖再選；示意圖為自訂科技風格，Tailwind 最容易精準實作；Reka UI 補上對話框、選單、日期選擇的無障礙行為 | 與 to-do-schedule 的 UI 寫法不同，基礎元件（按鈕、卡片、輸入框等）要自己做一套（5.5） |
 | ADR-13 | 交易加 `version` 樂觀鎖 | 表格模式會先載入再修改，中間可能被其他分頁或裝置改過；有版本號才能偵測並拒絕覆蓋 | 單筆編輯也必須帶 `version`；前端要保存載入時的版本 |
+| ADR-15 | 圖表用自製 SVG 元件，不用 Chart.js | 示意圖的圖表都是簡單的長條、折線、環形；SVG 可完全照示意圖畫，顏色直接用 CSS 變數；不增加約 200 KB 的套件 | 沒有內建的互動（縮放、圖例切換）；提示用 `<title>`；之後若需要複雜圖表再引入 |
+| ADR-16 | 匯率以 TWD 為中介保存 | 免費來源以 TWD 為基準最完整；只存一份就能支援任何本位幣（交叉匯率） | 本位幣不是 TWD 時換算多一次除法；手動匯率也以 TWD 表示 |
 | ADR-14 | 多筆儲存採「先全部檢查、再寫入、失敗補償」，不使用 MongoDB 多文件交易 | 與 ADR-02 一致，不必設定 `MongoTransactionManager`，本機獨立 MongoDB 也能開發；檢查都在寫入前完成，寫入階段失敗的機率很低 | 補償不是真正的交易：在補償完成前的極短時間內，其他請求可能看到一半的結果；補償失敗需依日誌人工還原。若之後要更嚴格，Atlas 支援多文件交易，可在此服務加上 `@Transactional` |

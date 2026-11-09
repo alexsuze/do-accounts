@@ -32,30 +32,105 @@
       </div>
 
       <div class="flex min-w-0 flex-[1_1_360px] flex-col gap-4">
-        <AppCard class="flex flex-col gap-2">
-          <h2 class="m-0 font-head text-base font-semibold">記帳偏好</h2>
-          <p class="m-0 text-sm text-muted">本位幣（目前 {{ auth.user?.base_currency || 'TWD' }}）、每週起始日、預算警示門檻會在階段 2 開放設定。</p>
+        <AppCard>
+          <h2 class="m-0 mb-1 font-head text-base font-semibold">記帳偏好</h2>
+          <div class="flex flex-wrap items-center gap-3 border-b border-line py-3.5">
+            <span class="mr-auto flex flex-col gap-0.5"><span>本位幣</span><span class="text-xs text-muted">總覽、報表、預算都換算成這個幣別</span></span>
+            <div class="w-44"><SelectField :model-value="prefs.base_currency" :options="CURRENCY_OPTIONS" label="" placeholder="本位幣" @update:model-value="askBase" /></div>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 border-b border-line py-3.5">
+            <span class="mr-auto">每週起始日</span>
+            <SegmentedControl :model-value="prefs.week_start" :options="WEEK" label="每週起始日" @update:model-value="v => save({ week_start: v })" />
+          </div>
+          <div class="flex flex-wrap items-center gap-3 py-3.5">
+            <span class="mr-auto flex flex-col gap-0.5"><span>預算警示門檻</span><span class="text-xs text-muted">達到這個比例時進度條變橘色</span></span>
+            <span class="flex items-center gap-2">
+              <input v-model="warn" type="number" min="1" max="100" inputmode="numeric" aria-label="預算警示門檻（%）"
+                class="num h-11 w-20 rounded-[10px] border border-line bg-panel2 px-3 text-right text-text outline-none focus:border-accent"
+                @change="saveWarn">
+              <span>%</span>
+            </span>
+          </div>
         </AppCard>
+
+        <AppCard class="flex flex-col gap-2.5">
+          <div class="flex flex-wrap items-center gap-2.5">
+            <h2 class="m-0 mr-auto font-head text-base font-semibold">匯率</h2>
+            <span class="num text-xs text-muted">每天 06:00、18:00 自動更新</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full border-collapse text-sm">
+              <thead>
+                <tr class="lbl text-left"><th class="py-2 font-normal">幣別</th><th class="py-2 text-right font-normal">1 單位 = TWD</th><th class="py-2 pl-3 font-normal">日期</th><th class="py-2 font-normal max-sm:hidden">來源</th><th /></tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in fx.latest" :key="r.currency" class="border-t border-line">
+                  <td class="num py-2 font-semibold">{{ r.currency }}</td>
+                  <td class="num py-2 text-right">{{ Number(r.rate).toFixed(4) }}</td>
+                  <td class="num py-2 pl-3 whitespace-nowrap">{{ shortDate(r.date) }}</td>
+                  <td class="py-2 text-xs max-sm:hidden" :class="r.manual ? 'text-accent' : 'text-muted'">{{ sourceLabel(r) }}</td>
+                  <td class="py-1 text-right"><AppButton variant="ghost" @click="openManual(r.currency)">手動覆寫</AppButton></td>
+                </tr>
+                <tr v-for="r in manual" :key="r.id" class="border-t border-line bg-accent-soft">
+                  <td class="num py-2 pl-2 font-semibold">{{ r.currency }}</td>
+                  <td class="num py-2 text-right">{{ Number(r.rate).toFixed(4) }}</td>
+                  <td class="num py-2 pl-3 whitespace-nowrap">{{ r.date }}</td>
+                  <td class="py-2 text-xs text-accent max-sm:hidden">手動（只影響你）</td>
+                  <td class="py-1 text-right"><AppButton variant="danger" @click="removeManual(r)">移除</AppButton></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <span class="text-xs text-muted">報表用交易當天的匯率換算；同一天有手動值時優先使用手動值。</span>
+          <span v-if="seedOnly" class="text-xs text-warn">目前還是內建的初始匯率，排程抓到最新匯率後會自動更新；需要精確數字可以先手動覆寫。</span>
+        </AppCard>
+
         <AppCard v-if="auth.isAdmin" class="flex flex-wrap items-center gap-3">
           <span class="lbl mr-auto">管理員工具</span>
           <RouterLink to="/admin" class="text-sm">使用者核准 →</RouterLink>
         </AppCard>
       </div>
     </div>
+
+    <AppDialog v-model:open="manualOpen" title="手動覆寫匯率" description="只影響你自己的換算；同一天再設定一次會覆蓋。" :width="440">
+      <form id="fx-form" class="flex flex-col gap-4" novalidate @submit.prevent="saveManual">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <SelectField v-model="mf.currency" label="幣別" :options="FX_OPTIONS" required />
+          <DateField v-model="mf.date" label="日期" :max="today()" :error="mErr.date" required />
+        </div>
+        <TextField v-model="mf.rate" :label="`1 ${mf.currency} = ? TWD`" inputmode="decimal" mono align="right" :error="mErr.rate" required />
+      </form>
+      <template #footer>
+        <AppButton variant="ghost" class="ml-auto" @click="manualOpen = false">取消</AppButton>
+        <AppButton type="submit" form="fx-form" :loading="busy">儲存</AppButton>
+      </template>
+    </AppDialog>
+    <ConfirmDialog v-model:open="baseConfirm" :title="`本位幣改成 ${pendingBase}？`" confirm-text="變更"
+      description="總覽與報表會改用新的本位幣換算。已設定的預算金額不會換算，請到預算頁確認金額。" @confirm="save({ base_currency: pendingBase })" />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { LogOut } from 'lucide-vue-next'
 import AppButton from '../components/ui/AppButton.vue'
 import AppCard from '../components/ui/AppCard.vue'
+import AppDialog from '../components/ui/AppDialog.vue'
 import Badge from '../components/ui/Badge.vue'
+import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import DateField from '../components/ui/DateField.vue'
+import SelectField from '../components/ui/SelectField.vue'
+import TextField from '../components/ui/TextField.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import SegmentedControl from '../components/ui/SegmentedControl.vue'
 import { useAuthStore } from '../stores/auth'
 import { useUiStore } from '../stores/ui'
+import { useFxStore } from '../stores/fx'
+import { toast } from '../stores/toast'
+import api from '../services/api'
+import { CURRENCY_OPTIONS } from '../utils/labels'
+import { shortDate, today } from '../utils/date'
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -63,6 +138,80 @@ const router = useRouter()
 const modes = [{ value: 'dark', label: '深色' }, { value: 'light', label: '淺色' }, { value: 'system', label: '跟隨系統' }]
 const pnls = [{ value: 'green', label: '綠收紅支' }, { value: 'red', label: '紅收綠支' }]
 const initial = computed(() => (auth.user?.name || auth.user?.email || '?').slice(0, 1).toUpperCase())
+
+const WEEK = [{ value: 'mon', label: '星期一' }, { value: 'sun', label: '星期日' }]
+const FX_OPTIONS = CURRENCY_OPTIONS.filter(o => o.value !== 'TWD')
+const SOURCES = { 'currency-api': 'currency-api', 'currency-api-mirror': 'currency-api（備援）', seed: '內建初始值', manual: '手動' }
+const fx = useFxStore()
+const prefs = computed(() => ({
+  base_currency: auth.user?.base_currency || 'TWD',
+  week_start: auth.user?.settings?.week_start || 'mon',
+  budget_warn_pct: auth.user?.settings?.budget_warn_pct ?? 80
+}))
+const warn = ref(String(prefs.value.budget_warn_pct))
+watch(() => prefs.value.budget_warn_pct, v => { warn.value = String(v) })
+const baseConfirm = ref(false)
+const pendingBase = ref('')
+const manual = ref([])
+const manualOpen = ref(false)
+const busy = ref(false)
+const mf = reactive({ currency: 'USD', date: today(), rate: '' })
+const mErr = reactive({})
+const seedOnly = computed(() => fx.latest.some(r => r.source === 'seed'))
+const sourceLabel = (r) => r.manual ? '手動（只影響你）' : SOURCES[r.source] ?? r.source
+
+async function save (body) {
+  await auth.updateSettings(body)
+  toast.success('已儲存設定')
+  if (body.base_currency) await fx.load()
+}
+function askBase (v) {
+  if (!v || v === prefs.value.base_currency) return
+  pendingBase.value = v
+  baseConfirm.value = true
+}
+function saveWarn () {
+  const n = Number(warn.value)
+  if (!Number.isInteger(n) || n < 1 || n > 100) {
+    toast.error('預算警示門檻需為 1～100 的整數')
+    warn.value = String(prefs.value.budget_warn_pct)
+    return
+  }
+  if (n !== prefs.value.budget_warn_pct) save({ budget_warn_pct: n })
+}
+
+async function loadFx () {
+  const [, m] = await Promise.all([fx.load(), api.get('/fx/manual')])
+  manual.value = m.data
+}
+function openManual (currency) {
+  const latest = fx.latest.find(r => r.currency === currency)
+  Object.assign(mf, { currency, date: today(), rate: latest ? String(Number(latest.rate)) : '' })
+  Object.keys(mErr).forEach(k => delete mErr[k])
+  manualOpen.value = true
+}
+async function saveManual () {
+  Object.keys(mErr).forEach(k => delete mErr[k])
+  const rate = String(mf.rate).replace(/,/g, '').trim()
+  if (!/^\d+(\.\d{1,8})?$/.test(rate) || !(Number(rate) > 0)) mErr.rate = '請輸入大於 0 的數字（最多 8 位小數）'
+  if (!mf.date) mErr.date = '請選擇日期'
+  if (Object.keys(mErr).length) return
+  busy.value = true
+  try {
+    await api.put('/fx/manual', { currency: mf.currency, date: mf.date, rate })
+    toast.success(`已設定 ${mf.date} 的 ${mf.currency} 匯率`)
+    manualOpen.value = false
+    await loadFx()
+  } finally {
+    busy.value = false
+  }
+}
+async function removeManual (r) {
+  await api.delete(`/fx/manual/${r.id}`)
+  toast.success(`已移除 ${r.date} 的手動 ${r.currency} 匯率`)
+  await loadFx()
+}
+onMounted(loadFx)
 
 function logout () {
   auth.logout()

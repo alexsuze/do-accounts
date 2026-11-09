@@ -27,6 +27,13 @@ export const useAuthStore = defineStore('auth', {
       this.user = data
       if (this.token) saveSession(this.token, data)
     },
+    /** 記帳偏好（本位幣、每週起始日、預算警示門檻），只送有變的欄位 */
+    async updateSettings (body) {
+      const { data } = await api.put('/auth/me/settings', body)
+      this.user = data
+      saveSession(this.token, data)
+      return data
+    },
     logout () {
       this.token = null
       this.user = null
