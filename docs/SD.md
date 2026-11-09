@@ -220,6 +220,7 @@ UI 元件庫等 UI 設計（頁面示意圖）確認後再決定，不影響後�
 | entries | array | 分錄，見下表 |
 | investment | object / null | `kind = investment` 時的投資明細，見 2.6 |
 | import_batch_id | string / null | 由哪一次匯入建立 |
+| version | long | 樂觀鎖版本（Spring Data `@Version`）；每次修改自動加 1，用來偵測「載入後已被別處修改」 |
 | created_at / updated_at | Date | |
 
 **entries 陣列元素**
@@ -412,10 +413,11 @@ erDiagram
 |---|---|---|
 | GET | `/api/transactions` | 篩選 `from, to, account_id, category_id, kind, tag, q, min, max`（可複選者用逗號分隔）、分頁；另回傳 `daily_totals` |
 | POST | `/api/transactions` | 新增收入／支出／轉帳 |
-| PUT | `/api/transactions/{id}` | 完整覆寫（`kind = investment` 的請改走投資 API → 422） |
+| PUT | `/api/transactions/{id}` | 完整覆寫，body 需帶 `version`；版本不符 → 409「此筆紀錄已在其他地方被修改，請重新整理」（`kind = investment` 的請改走投資 API → 422） |
 | DELETE | `/api/transactions/{id}` | |
 | POST | `/api/transactions/bulk-delete` | `{ ids }` |
 | POST | `/api/transactions/bulk-update` | `{ ids, category_id?, add_tags?, remove_tags? }` |
+| POST | `/api/transactions/batch` | 表格模式一次儲存：`{ creates[], updates[], deletes[] }`，詳見 4.2.1 |
 | GET | `/api/transactions/suggest?q=` | 依項目名稱回傳最常用的分類與帳戶 |
 | GET | `/api/transactions/export` | CSV 下載，參數同列表篩選 |
 
@@ -565,6 +567,60 @@ delete(userId, id):
 
 `buildEntries` 是純函式（只依賴 request 與帳戶資料），單元測試涵蓋每種交易類型、跨幣別、手續費和各種錯誤情況。
 
+#### 4.2.1 多筆編輯（`TransactionBatchService`，SA FR-3.10～3.20）
+
+**Request／Response**
+
+```json
+// POST /api/transactions/batch
+{
+  "creates": [ { "row": 1, "kind": "expense", "date": "2026-11-09", "title": "午餐", "category_id": "…", "account_id": "…", "amount": "120" } ],
+  "updates": [ { "row": 5, "id": "…", "version": 3, "kind": "expense", "date": "2026-11-08", "title": "晚餐", "category_id": "…", "account_id": "…", "amount": "260" } ],
+  "deletes": [ { "row": 9, "id": "…", "version": 1 } ]
+}
+// 200
+{ "created": [ { "row": 1, "transaction": { … } } ], "updated": [ … ], "deleted_ids": [ "…" ] }
+// 422（任何一列有錯，全部不寫入）
+{ "status": 422, "detail": "有 2 列資料有誤，未儲存任何資料",
+  "errors": [ { "row": 3, "field": "date", "message": "交易日期不能早於帳戶開戶日期（2026-01-01）" } ] }
+// 409（版本衝突，全部不寫入）
+{ "status": 409, "detail": "有 1 筆紀錄已在其他地方被修改或刪除，請重新載入", "conflicts": [ { "row": 5, "id": "…" } ] }
+```
+
+- `row` 是前端表格的列號，只用來對應錯誤訊息，後端不保存。
+- 每列的欄位與 `TransactionRequest` 相同（3.4），沿用同一套 `validate()` 與 `buildEntries()`。
+- 錯誤回應以 Problem Details 加上擴充欄位 `errors`／`conflicts`（`ProblemDetail.setProperty`）。
+
+**處理流程**
+
+```
+batch(userId, req):
+  0. 總列數 > 100 → 400
+  1. 一次載入需要的資料：使用者的全部帳戶、分類；updates＋deletes 涉及的既有交易（findAllById，過濾 user_id）
+  2. 衝突檢查：既有交易不存在、不屬於本人、version 不符、kind = investment → 收集到 conflicts
+  3. 逐列 validate（與單筆相同的規則，含開戶日期檢查）→ 收集到 errors（不中途停止，一次回報全部）
+  4. conflicts 非空 → 409；errors 非空 → 422；兩者都不寫入
+  5. 寫入（依序）：
+       a. insertAll(creates)
+       b. updates：逐筆 save（帶 version，Spring Data 會再檢查一次）
+       c. deletes：逐筆 delete（帶 version 條件）
+  6. 任一步失敗 → 補償：刪除 a 已新增的文件；把 b 已更新的文件還原成步驟 1 載入的原始內容；把 c 已刪除的文件重新寫回
+     → 回 500「儲存失敗，資料未變更，請重試」，補償失敗則記錄 ERROR 日誌（含全部原始文件，供人工還原）
+```
+
+- 為什麼不用 MongoDB 多文件交易：見 ADR-14。檢查都在步驟 1～4 完成，步驟 5 只剩資料庫寫入，實務上只有斷線才會失敗，補償的情況極少。
+- 步驟 5b、5c 若遇到版本衝突（步驟 2 之後到寫入前的短暫時間被別處改了），一樣觸發補償並回 409。
+- 單元測試：全部成功、單列錯誤不寫入、多列錯誤一次回報、版本衝突、別人的交易、超過上限、寫入中途失敗後補償正確。
+
+**前端（`components/TransactionGrid.vue`、`components/TransactionCardList.vue`）**
+
+- 表格狀態放在 `stores/transactionBatch`：每列 `{ row, status: new/modified/deleted/clean, original, current, errors }`；可單列還原成 `original`。
+- 前端先做即時檢查（必填、金額算式、日期格式、轉帳兩帳戶不同），通過後才送出；最終以後端檢查為準。
+- 貼上（`utils/paste.js`，純函式＋ `node --test`）：解析剪貼簿的 Tab 分隔文字（Excel、Google 試算表複製出來就是這個格式），依目前欄位順序對應；日期格式轉換；帳戶、分類用名稱完全相同 → 去除空白後相同 → 包含，依序比對，找不到就留空並標紅。
+- 草稿：每次變更後 1 秒寫入 localStorage `do-accounts:batch-draft`（含載入時的篩選條件與 version），開啟表格模式時若有草稿就詢問是否還原；儲存成功後清除。
+- 離開提醒：路由 `beforeRouteLeave` ＋ `window.onbeforeunload`。
+- 表格元件：等 UI 元件庫決定後（1.5）再選定格子編輯的實作方式；需要支援鍵盤移動、格子內下拉選單、貼上。若元件庫的表格不支援格子編輯，就自己做（`<table>` ＋ 每格一個輸入框）。
+
 ### 4.3 金額處理
 
 - 幣別設定（後端 `Currencies`、前端 `utils/money.js`，內容一致）：
@@ -693,7 +749,8 @@ sequenceDiagram
 |---|---|---|
 | `#/login` | LoginPage | Google 登入；pending 時顯示「等待核准」 |
 | `#/` | DashboardPage | 淨資產三卡、帳戶分組（拖曳排序）、本月收支與預算、最近交易、快速記帳 |
-| `#/transactions` | TransactionsPage | 篩選列（同步到 URL query）、依日期分組、每日小計、分頁、批次操作 |
+| `#/transactions` | TransactionsPage | 篩選列（同步到 URL query）、依日期分組、每日小計、分頁、批次操作、「表格編輯」按鈕 |
+| `#/transactions/grid` | TransactionGridPage | 表格模式（4.2.1）；`?from&to…` 帶篩選條件載入既有交易，沒有參數時為空白表格；手機版改為卡片清單 |
 | `#/accounts`、`#/accounts/:id` | AccountsPage、AccountDetailPage | 帳戶管理；單一帳戶的餘額走勢與明細 |
 | `#/categories` | CategoriesPage | 收入／支出頁籤，兩層分類，拖曳排序 |
 | `#/budgets` | BudgetsPage | 月份切換、總預算與分類進度條、複製上月 |
@@ -713,6 +770,7 @@ sequenceDiagram
 | `accounts` | 帳戶清單（含餘額）、依 kind 分組的 getter、CRUD、排序（樂觀更新，失敗回滾） |
 | `categories` | 分類清單、樹狀 getter、`label(id)` |
 | `transactions` | 目前篩選條件與分頁結果、CRUD；寫入成功後通知 `accounts` 重新載入 |
+| `transactionBatch` | 表格模式的列狀態、即時檢查、草稿暫存、送出與錯誤對應 |
 | `budgets` | 指定月份的預算與花費 |
 | `reports` | 各報表資料（依參數快取） |
 | `investments` | 持倉、投資交易、證券搜尋 |
@@ -737,6 +795,8 @@ graph TD
     TradeDlg --> SS[SecuritySearch]
     TradeDlg --> MI
     RV --> IW[ImportWizard]
+    RV --> TG[TransactionGrid / TransactionCardList<br/>表格模式]
+    TG --> MI
 ```
 
 ### 5.4 響應式與主題
@@ -836,6 +896,7 @@ spring.servlet.multipart.max-file-size=5MB
 |---|---|---|
 | 階段 0 基礎 | 頁面示意圖確認 → 決定 UI 元件庫（1.5）；monorepo 骨架、Spring Boot 專案、Vite ＋ Vue 前端、登入（直接移植 to-do-schedule 的 AuthFilter／TokenService／GoogleVerifier／UserService／AdminPage）、部署流程 | 可用 Google 登入，GitHub Pages ↔ Railway ↔ Atlas 接通 |
 | 階段 1 核心記帳 | 帳戶、分類、交易（收支、轉帳）、首頁、計算機 | 可完成日常記帳，取代舊版 money |
+| 階段 1.5 多筆編輯 | 批次儲存 API、表格模式、從 Excel 貼上、草稿、手機卡片清單 | 可一次輸入 20 筆發票並一起儲存；一列有錯時一筆都不寫入 |
 | 階段 2 預算與報表 | 匯率排程、預算、四種報表 | 涵蓋舊版 money 全部功能 |
 | 階段 3 匯入匯出 | CSV 匯出、匯入精靈、範本、撤銷、JSON 備份 | 能匯入一份實際的銀行對帳單 |
 | 階段 4 投資 | 證券、投資交易、持倉、台股報價、整合淨資產 | 投資市值反映在首頁與趨勢圖 |
@@ -861,3 +922,5 @@ spring.servlet.multipart.max-file-size=5MB
 | ADR-10 | 索引在啟動後背景建立 | 有索引才能做日期與帳戶查詢；背景建立又不會像 `auto-index-creation` 那樣讓本機沒有 MongoDB 時無法啟動 | 第一次部署的頭幾秒查詢可能沒有索引 |
 | ADR-11 | 不遷移舊版 money 資料 | 使用者已確認從零開始 | 之後若需要，可寫腳本：舊 MongoDB → JSON 備份格式 → 用備份還原 |
 | ADR-12 | UI 元件庫延後決定 | 使用者希望先確認 UI 設計；元件庫只影響前端畫面層 | 選定前，頁面元件不開始實作；前端邏輯層（stores、services、utils）可先做 |
+| ADR-13 | 交易加 `version` 樂觀鎖 | 表格模式會先載入再修改，中間可能被其他分頁或裝置改過；有版本號才能偵測並拒絕覆蓋 | 單筆編輯也必須帶 `version`；前端要保存載入時的版本 |
+| ADR-14 | 多筆儲存採「先全部檢查、再寫入、失敗補償」，不使用 MongoDB 多文件交易 | 與 ADR-02 一致，不必設定 `MongoTransactionManager`，本機獨立 MongoDB 也能開發；檢查都在寫入前完成，寫入階段失敗的機率很低 | 補償不是真正的交易：在補償完成前的極短時間內，其他請求可能看到一半的結果；補償失敗需依日誌人工還原。若之後要更嚴格，Atlas 支援多文件交易，可在此服務加上 `@Transactional` |
