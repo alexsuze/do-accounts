@@ -130,6 +130,21 @@ public class LedgerQueries {
         }
     }
 
+    /**
+     * 多筆儲存失敗時的補償用（SD 4.2.1 步驟 6）：直接把原始文件寫回，不經過版本檢查。
+     * 先刪掉同 id 的文件（可能是已被更新過的版本），再插入原始內容。
+     */
+    public void restore(Transaction original) {
+        mongo.remove(Query.query(where("_id").is(original.id)), Transaction.class);
+        mongo.insert(original);
+    }
+
+    /** 補償用：刪掉這次新增的文件 */
+    public void removeByIds(String userId, Collection<String> ids) {
+        if (ids.isEmpty()) return;
+        mongo.remove(Query.query(where("user_id").is(userId).and("_id").in(ids)), Transaction.class);
+    }
+
     private static boolean notEmpty(Collection<?> c) {
         return c != null && !c.isEmpty();
     }

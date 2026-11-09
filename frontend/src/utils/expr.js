@@ -76,3 +76,15 @@ export function toAmountString (src, digits) {
   if (v === null) return null
   return v.toDecimalPlaces(digits, Decimal.ROUND_HALF_UP).toFixed(digits)
 }
+
+/**
+ * 直接輸入的數字（不是算式）小數位數超過幣別允許時回傳錯誤訊息，否則回傳空字串。
+ * 算式的結果會自動四捨五入（例如 100/3），但直接打 12.5 到新台幣欄位應該提醒，而不是默默改成 13
+ */
+export function decimalsError (src, digits, currency) {
+  const s = String(src ?? '').replace(/,/g, '').trim()
+  if (isExpression(s)) return ''
+  const m = s.match(/\.(\d+)$/)
+  if (!m || m[1].replace(/0+$/, '').length <= digits) return ''
+  return digits === 0 ? `${currency} 不能有小數` : `${currency} 最多 ${digits} 位小數`
+}

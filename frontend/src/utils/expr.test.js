@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluate, isExpression, toAmountString } from './expr.js'
+import { evaluate, isExpression, toAmountString, decimalsError } from './expr.js'
 
 const ev = (s) => evaluate(s).toString()
 
@@ -45,4 +45,13 @@ test('toAmountString 依位數四捨五入', () => {
   assert.equal(toAmountString('100/3', 2), '33.33')
   assert.equal(toAmountString('2.345', 2), '2.35')
   assert.equal(toAmountString('', 0), null)
+})
+
+test('decimalsError：直接輸入的小數位數，算式不檢查', () => {
+  assert.equal(decimalsError('12.5', 0, 'TWD'), 'TWD 不能有小數')
+  assert.equal(decimalsError('12.50', 2, 'USD'), '')
+  assert.equal(decimalsError('12.500', 2, 'USD'), '', '多的 0 不算')
+  assert.equal(decimalsError('1.234', 2, 'USD'), 'USD 最多 2 位小數')
+  assert.equal(decimalsError('100/3', 0, 'TWD'), '', '算式結果會四捨五入')
+  assert.equal(decimalsError('1,200', 0, 'TWD'), '')
 })

@@ -1,5 +1,5 @@
 <template>
-  <component :is="to ? RouterLink : 'button'" :to="to" :type="to ? undefined : type" :disabled="disabled || loading"
+  <component :is="to ? RouterLink : 'button'" :to="to" :type="to ? undefined : type" :disabled="to ? undefined : (disabled || loading)"
     :class="[base, sizes[size], variants[variant], (disabled || loading) && 'opacity-50']">
     <span v-if="loading" class="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
     <slot />

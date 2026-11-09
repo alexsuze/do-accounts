@@ -620,7 +620,14 @@ batch(userId, req):
 - 貼上（`utils/paste.js`，純函式＋ `node --test`）：解析剪貼簿的 Tab 分隔文字（Excel、Google 試算表複製出來就是這個格式），依目前欄位順序對應；日期格式轉換；帳戶、分類用名稱完全相同 → 去除空白後相同 → 包含，依序比對，找不到就留空並標紅。
 - 草稿：每次變更後 1 秒寫入 localStorage `do-accounts:batch-draft`（含載入時的篩選條件與 version），開啟表格模式時若有草稿就詢問是否還原；儲存成功後清除。
 - 離開提醒：路由 `beforeRouteLeave` ＋ `window.onbeforeunload`。
-- 表格元件：自建（`<table>` ＋ 每格一個輸入框，Tailwind 樣式）；鍵盤移動、格子內下拉選單（Reka UI Combobox）、貼上都自己處理，版面見示意圖「表格模式」。
+- 表格元件：自建（`<table class="table-fixed">` ＋ 每格一個輸入框，Tailwind 樣式），版面見示意圖「表格模式」；這一頁隱藏側邊欄、全寬顯示（路由 `meta.wide`）。
+- 格子內的下拉選單（類型、分類、帳戶）用**原生 `<select>`**：在表格裡用鍵盤一格一格快速輸入時比 Reka UI 順手，手機也有系統選單；其他地方的下拉選單仍用 Reka UI Select。
+- 鍵盤：Enter 移到下一列同一欄（最後一列自動新增）、Ctrl+D 把上一列同一欄的值帶下來（Excel 的往下填滿）、Ctrl+S 儲存全部。
+- 貼上：從目前所在的格子開始依欄位順序填入；沒有貼「類型」時，依比對到的分類決定收入／支出，負數金額視為支出並取絕對值；`(30)`、`30-` 也視為負數；民國年（115/11/09）會自動換算。
+- 新的一列沿用上一列的日期、類型、帳戶（SA FR-3.13）。
+- 金額欄直接輸入的數字若超過幣別的小數位數（例如新台幣打 12.5）會標錯，不自動四捨五入；算式的結果（100/3）才四捨五入。記帳視窗也套用同一規則。
+- 版本衝突後按「重新載入」會捨棄草稿，避免還原後又帶回過期的版本號。
+- 轉帳的手續費不在表格欄位中，編輯既有轉帳時原樣保留（隱藏欄位）並一起送出。
 
 ### 4.3 金額處理
 
@@ -1022,7 +1029,7 @@ spring.servlet.multipart.max-file-size=5MB
 | 層級 | 範圍 | 工具 |
 |---|---|---|
 | 後端單元 | `TransactionService.buildEntries`（每種類型、跨幣別、手續費、錯誤）、`HoldingCalculator`、`FxService` 查找、`ImportService` 解析與重複判斷、`BudgetService` 花費計算、`TokenService`、資料隔離 | JUnit 5 ＋ Mockito（比照 to-do-schedule：用 mock repository ＋ 記憶體 List，不需要 MongoDB） |
-| 後端整合 | aggregation 查詢（餘額、報表） | `@DataMongoTest` ＋ Testcontainers MongoDB（CI 才跑；本機沒有 Docker 時略過） |
+| 後端整合 | 需要真的 MongoDB 才能驗證的行為：Decimal128 加總、刪除／更新時比對版本號、補償寫回原始文件（`it/LedgerMongoIT`） | JUnit ＋ 真的 MongoDB；只在設定 `MONGO_IT_URI` 時執行，CI 預設略過 |
 | 前端 | `utils/theme.js`、`utils/money.js`、`utils/expr.js`、`utils/date.js` | `npm test`（`node --test "src/utils/*.test.js"`） |
 | 手動驗收 | 每個階段結束後依 SA 使用案例實際操作 | — |
 

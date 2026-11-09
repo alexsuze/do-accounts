@@ -1,6 +1,7 @@
 <template>
   <div class="flex flex-col gap-5">
     <PageHeader eyebrow="Transactions" title="明細">
+      <AppButton variant="ghost" :to="{ path: '/transactions/grid', query: gridQuery }"><Table :size="16" aria-hidden="true" />表格編輯</AppButton>
       <AppButton @click="ui.openTx()"><Plus :size="16" aria-hidden="true" />記帳</AppButton>
     </PageHeader>
 
@@ -69,7 +70,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Plus, Search } from 'lucide-vue-next'
+import { Plus, Search, Table } from 'lucide-vue-next'
 import Amount from '../components/ui/Amount.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import AppCard from '../components/ui/AppCard.vue'
@@ -111,6 +112,8 @@ const filter = computed(() => ({
   q: route.query.q || '',
   page: Number(route.query.page) || 0
 }))
+// 表格編輯：帶目前的篩選條件；month 固定帶上，避免沒有任何條件時被當成空白表格
+const gridQuery = computed(() => ({ ...route.query, month: filter.value.month, page: undefined }))
 const hasFilter = computed(() => !!(filter.value.kind || filter.value.account || filter.value.category || filter.value.q))
 const keyword = ref(filter.value.q)
 const page = ref(null)
