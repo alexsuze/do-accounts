@@ -87,6 +87,8 @@ public class Transaction {
         public static final String STOCK_DIVIDEND = "stock_dividend";
         public static final String SPLIT = "split";
         public static final String FEE = "fee";
+        /** 期初持股：開始記帳前就持有的股票，只登錄股數、均價與投入本金，不影響現金 */
+        public static final String OPENING = "opening";
 
         /** 持有證券的投資帳戶 */
         @Field("account_id")
@@ -105,5 +107,8 @@ public class Transaction {
         public BigDecimal fee;
         @Field(targetType = FieldType.DECIMAL128)
         public BigDecimal tax;
+        /** 期初持股的投入本金（報酬率的分母）；null 表示等於股數 × 均價 */
+        @Field(targetType = FieldType.DECIMAL128)
+        public BigDecimal principal;
     }
 }

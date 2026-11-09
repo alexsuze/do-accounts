@@ -35,8 +35,10 @@ public final class HoldingCalculator {
         public BigDecimal realized = BigDecimal.ZERO;
         /** 現金股利（扣除費用後） */
         public BigDecimal dividends = BigDecimal.ZERO;
-        /** 累計投入：所有買進的金額＋費用（報酬率的分母） */
+        /** 累計投入：所有買進的金額＋費用＋期初持股的投入本金（報酬率的分母） */
         public BigDecimal invested = BigDecimal.ZERO;
+        /** 期初持股的成本與投入本金的差額（開始記帳前已累積的損益，計入報酬率的分子） */
+        public BigDecimal priorGain = BigDecimal.ZERO;
         /** 年份 → 已實現損益 */
         public final Map<String, BigDecimal> realizedByYear = new HashMap<>();
         /** 年份 → 現金股利 */
@@ -94,6 +96,14 @@ public final class HoldingCalculator {
                     p.cost = p.cost.add(c);
                     p.invested = p.invested.add(c);
                     p.held = p.held.add(qty);
+                }
+                case Investment.OPENING -> {
+                    BigDecimal c = qty.multiply(price);
+                    BigDecimal principal = iv.principal == null ? c : iv.principal;
+                    p.cost = p.cost.add(c);
+                    p.held = p.held.add(qty);
+                    p.invested = p.invested.add(principal);
+                    p.priorGain = p.priorGain.add(c.subtract(principal));
                 }
                 case Investment.SELL -> {
                     if (qty.compareTo(p.held) > 0) {

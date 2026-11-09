@@ -97,7 +97,7 @@
             <span class="num w-12 text-xs text-muted">{{ shortDate(r.transaction.date) }}</span>
             <Badge :tone="TRADE_TONE[r.transaction.investment.trade_type]">{{ tradeLabel(r.transaction.investment.trade_type) }}</Badge>
             <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span class="truncate">{{ r.security?.symbol }} {{ r.security?.name }}<template v-if="r.transaction.investment.quantity && ['buy', 'sell', 'stock_dividend'].includes(r.transaction.investment.trade_type)"> × {{ qty(r.transaction.investment.quantity) }}</template></span>
+              <span class="truncate">{{ r.security?.symbol }} {{ r.security?.name }}<template v-if="r.transaction.investment.quantity && ['buy', 'sell', 'stock_dividend', 'opening'].includes(r.transaction.investment.trade_type)"> × {{ qty(r.transaction.investment.quantity) }}</template></span>
               <span class="num truncate text-xs text-muted">{{ tradeMeta(r) }}</span>
             </span>
             <span class="flex flex-col items-end">
@@ -152,7 +152,7 @@ import { assetTypeLabel, hasAutoQuote, marketLabel, tradeLabel } from '../utils/
 // 投資頁（SA FR-9、SD 5.1、示意圖 Investments）：?account= 切換投資帳戶
 const RECENT = 8
 const COLORS = ['var(--c1)', 'var(--c3)', 'var(--c2)', 'var(--c4)', 'var(--c5)', 'var(--c6)']
-const TRADE_TONE = { buy: 'accent', sell: 'warn', cash_dividend: 'inc', stock_dividend: 'inc', split: 'muted', fee: 'exp' }
+const TRADE_TONE = { buy: 'accent', sell: 'warn', cash_dividend: 'inc', stock_dividend: 'inc', split: 'muted', fee: 'exp', opening: 'muted' }
 const route = useRoute()
 const router = useRouter()
 const ui = useUiStore()
@@ -197,6 +197,10 @@ const tradeMeta = (r) => {
   const parts = []
   const cur = r.security?.currency
   if (iv.trade_type === 'buy' || iv.trade_type === 'sell') parts.push(`@ ${px(iv.price, cur)}`)
+  if (iv.trade_type === 'opening') {
+    parts.push(`均價 ${px(iv.price, cur)}`)
+    if (iv.principal != null) parts.push(`投入本金 ${formatAmount(iv.principal, cur)}`)
+  }
   if (iv.trade_type === 'cash_dividend') parts.push(`每股 ${px(iv.price, cur)} × ${qty(iv.quantity)}`)
   if (iv.trade_type === 'split') parts.push(`1 股變 ${qty(iv.quantity)} 股`)
   if (Number(iv.fee)) parts.push(`手續費 ${formatAmount(iv.fee, cur)}`)

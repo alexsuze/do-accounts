@@ -7,7 +7,8 @@ export const TRADE_TYPES = [
   { value: 'cash_dividend', label: '現金股利' },
   { value: 'stock_dividend', label: '股票股利' },
   { value: 'split', label: '分割' },
-  { value: 'fee', label: '費用' }
+  { value: 'fee', label: '費用' },
+  { value: 'opening', label: '期初持股' }
 ]
 export const tradeLabel = (v) => TRADE_TYPES.find(t => t.value === v)?.label ?? v
 
@@ -89,6 +90,10 @@ export function afterTrade (type, holding, { quantity, price, fee, tax }) {
       return { quantity: h.toNumber(), avg: avg(cost, h) }
     }
     case 'fee': return { quantity: held.toNumber(), avg: avg(cost.plus(d(fee)), held) }
+    case 'opening': {
+      const c = cost.plus(q.times(d(price))); const h = held.plus(q)
+      return { quantity: h.toNumber(), avg: avg(c, h) }
+    }
     default: return { quantity: held.toNumber(), avg: avg(cost, held) }
   }
 }
