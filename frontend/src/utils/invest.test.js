@@ -31,4 +31,6 @@ test('交易後持股與均價', () => {
   assert.equal(afterTrade('stock_dividend', h, { quantity: '50' }).avg, 158200 / 1050)
   assert.deepEqual(afterTrade('split', h, { quantity: '4' }), { quantity: 4000, avg: 39.55 })
   assert.equal(afterTrade('buy', null, { quantity: '10', price: '5' }).avg, 5)
+  assert.deepEqual(afterTrade('opening', null, { quantity: '1000', price: '150' }), { quantity: 1000, avg: 150 })
+  assert.equal(settlement('opening', { quantity: '1000', price: '150' }), null, '期初持股沒有現金')
 })

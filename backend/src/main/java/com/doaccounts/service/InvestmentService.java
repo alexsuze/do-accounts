@@ -42,7 +42,8 @@ public class InvestmentService {
     static final int MAX_DECIMALS = 6;
     private static final Pattern CODE = Pattern.compile("^[0-9A-Za-z.\\-]{1,12}$");
     private static final Map<String, String> TYPE_LABEL = Map.of(Investment.BUY, "買進", Investment.SELL, "賣出",
-            Investment.CASH_DIVIDEND, "現金股利", Investment.STOCK_DIVIDEND, "股票股利", Investment.SPLIT, "分割", Investment.FEE, "費用");
+            Investment.CASH_DIVIDEND, "現金股利", Investment.STOCK_DIVIDEND, "股票股利", Investment.SPLIT, "分割", Investment.FEE, "費用",
+            Investment.OPENING, "期初持股");
 
     private final TransactionRepository txRepo;
     private final LedgerQueries ledger;
@@ -180,10 +181,11 @@ public class InvestmentService {
      * @param quantity 股數；現金股利為參與配息的股數；分割為比例
      * @param price 成交價；現金股利為每股配息
      * @param settlementAmount 交割帳戶與證券幣別不同時，實際扣款或入帳的金額（交割帳戶幣別，正數）
+     * @param principal 期初持股的投入本金（證券幣別）；省略時等於股數 × 均價
      */
     public record TradeRequest(String tradeType, String accountId, String securityId, String date, BigDecimal quantity,
                                BigDecimal price, BigDecimal fee, BigDecimal tax, String settlementAccountId,
-                               BigDecimal settlementAmount, String note, Long version) {}
+                               BigDecimal settlementAmount, String note, Long version, BigDecimal principal) {}
 
     public Transaction create(String userId, TradeRequest req) {
         Transaction t = new Transaction();
@@ -249,7 +251,19 @@ public class InvestmentService {
         check(fee, "fee", "手續費", false);
         check(tax, "tax", "稅", false);
         BigDecimal cash; // 證券幣別，流入為正；null 表示沒有現金
+        BigDecimal principal = null;
         switch (type) {
+            case Investment.OPENING -> {
+                check(qty, "quantity", "股數", true);
+                check(price, "price", "均價", false);
+                if (req.principal() != null) {
+                    check(req.principal(), "principal", "投入本金", false);
+                    principal = req.principal().stripTrailingZeros();
+                }
+                fee = BigDecimal.ZERO;
+                tax = BigDecimal.ZERO;
+                cash = null;
+            }
             case Investment.BUY, Investment.SELL -> {
                 check(qty, "quantity", "股數", true);
                 check(price, "price", "成交價", false);
@@ -319,6 +333,7 @@ public class InvestmentService {
         iv.price = price == null ? null : price.stripTrailingZeros();
         iv.fee = fee.stripTrailingZeros();
         iv.tax = tax.stripTrailingZeros();
+        iv.principal = principal;
 
         String note = req.note() == null ? "" : req.note().trim();
         if (note.length() > 500) throw field("note", "備註最多 500 字");
@@ -405,7 +420,7 @@ public class InvestmentService {
         Snapshot s = snapshot(user, today);
         RateTable rates = s.rates;
         BigDecimal mv = BigDecimal.ZERO, cost = BigDecimal.ZERO, realizedYear = BigDecimal.ZERO, realizedTotal = BigDecimal.ZERO;
-        BigDecimal divTotal = BigDecimal.ZERO, divYear = BigDecimal.ZERO, invested = BigDecimal.ZERO;
+        BigDecimal divTotal = BigDecimal.ZERO, divYear = BigDecimal.ZERO, invested = BigDecimal.ZERO, priorGain = BigDecimal.ZERO;
         int divCount = 0;
         String oldest = null;
         Map<String, Map<String, BigDecimal>> alloc = new LinkedHashMap<>();
@@ -420,6 +435,7 @@ public class InvestmentService {
             divYear = divYear.add(rates.toBase(p.dividendsByYear.getOrDefault(year, BigDecimal.ZERO), cur, today));
             divCount += p.dividendCountByYear.getOrDefault(year, 0);
             invested = invested.add(rates.toBase(p.invested, cur, today));
+            priorGain = priorGain.add(rates.toBase(p.priorGain, cur, today));
         }
         for (Holding h : s.holdings) {
             if (accountId != null && !accountId.equals(h.accountId())) continue;
@@ -439,7 +455,7 @@ public class InvestmentService {
         alloc.forEach((k, m) -> allocation.put(k, m.entrySet().stream()
                 .sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())
                 .map(e -> new Slice(e.getKey(), Currencies.round(e.getValue(), base), pct(e.getValue(), total))).toList()));
-        BigDecimal ret = invested.signum() == 0 ? BigDecimal.ZERO : pct(unrealized.add(realizedTotal).add(divTotal), invested);
+        BigDecimal ret = invested.signum() == 0 ? BigDecimal.ZERO : pct(unrealized.add(realizedTotal).add(divTotal).add(priorGain), invested);
         return new Summary(base, Currencies.round(mv, base), Currencies.round(cost, base), Currencies.round(unrealized, base),
                 pct(unrealized, cost), Currencies.round(realizedYear, base), sells, Currencies.round(realizedTotal, base),
                 Currencies.round(divTotal, base), Currencies.round(divYear, base), divCount, ret, oldest, allocation);
@@ -487,7 +503,9 @@ public class InvestmentService {
             Price px = pt.at(p.securityId, date);
             BigDecimal mv = px == null ? p.cost : p.held.multiply(px.close);
             BigDecimal unrealized = mv.subtract(p.cost);
-            BigDecimal ret = p.invested.signum() == 0 ? BigDecimal.ZERO : pct(unrealized.add(p.realized).add(p.dividends), p.invested);
+            // 報酬率 =（未實現＋已實現＋股利＋期初持股開始記帳前的損益）÷ 累計投入
+            BigDecimal ret = p.invested.signum() == 0 ? BigDecimal.ZERO
+                    : pct(unrealized.add(p.realized).add(p.dividends).add(p.priorGain), p.invested);
             String base = FxService.baseOf(user);
             BigDecimal mvBase = Currencies.round(rates.toBase(mv, sec.currency, date), base);
             list.add(new Holding(p.accountId, sec, p.held, p.avg().setScale(4, RoundingMode.HALF_UP), money(p.cost, sec.currency),

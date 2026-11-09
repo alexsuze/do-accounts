@@ -48,7 +48,7 @@ class InvestmentTest {
 
     private TradeRequest trade(String type, Account acc, Security s, String date, String qty, String price, String fee, String tax, Account settle) {
         return new TradeRequest(type, acc.id, s.id, date, qty == null ? null : new BigDecimal(qty), price == null ? null : new BigDecimal(price),
-                fee == null ? null : new BigDecimal(fee), tax == null ? null : new BigDecimal(tax), settle == null ? null : settle.id, null, null, null);
+                fee == null ? null : new BigDecimal(fee), tax == null ? null : new BigDecimal(tax), settle == null ? null : settle.id, null, null, null, null);
     }
 
     private BigDecimal balance(Account a) {
@@ -109,11 +109,11 @@ class InvestmentTest {
         var ex = assertThrows(ResponseStatusException.class, () -> f.investmentService.create(ME, trade("sell", broker, etf, "2026-05-01", "41", "160", null, null, null)));
         assertTrue(ex.getReason().contains("持有 40 股"), ex.getReason());
         assertThrows(ResponseStatusException.class, () -> f.investmentService.delete(ME, buy.id), "刪掉買進後之前的賣出會超賣");
-        var shrink = new TradeRequest("buy", broker.id, etf.id, "2026-03-01", new BigDecimal("50"), new BigDecimal("150"), null, null, null, null, null, buy.version);
+        var shrink = new TradeRequest("buy", broker.id, etf.id, "2026-03-01", new BigDecimal("50"), new BigDecimal("150"), null, null, null, null, null, buy.version, null);
         assertThrows(ResponseStatusException.class, () -> f.investmentService.update(ME, buy.id, shrink), "把買進改少也會超賣");
-        var stale = new TradeRequest("buy", broker.id, etf.id, "2026-03-01", new BigDecimal("200"), new BigDecimal("150"), null, null, null, null, null, buy.version + 9);
+        var stale = new TradeRequest("buy", broker.id, etf.id, "2026-03-01", new BigDecimal("200"), new BigDecimal("150"), null, null, null, null, null, buy.version + 9, null);
         assertThrows(ResponseStatusException.class, () -> f.investmentService.update(ME, buy.id, stale), "版本不符");
-        var grow = new TradeRequest("buy", broker.id, etf.id, "2026-03-01", new BigDecimal("200"), new BigDecimal("150"), null, null, null, null, null, buy.version);
+        var grow = new TradeRequest("buy", broker.id, etf.id, "2026-03-01", new BigDecimal("200"), new BigDecimal("150"), null, null, null, null, null, buy.version, null);
         f.investmentService.update(ME, buy.id, grow);
         eq("140", HoldingCalculator.compute(f.ledger.investments(ME), null).get(broker.id, etf.id).held);
         assertThrows(ResponseStatusException.class, () -> f.investmentService.trade(OTHER, buy.id), "別人的交易 404");
@@ -130,7 +130,7 @@ class InvestmentTest {
         // 美股用台幣帳戶交割：必須填實際扣款金額
         assertThrows(ResponseStatusException.class, () -> f.investmentService.create(ME, trade("buy", usBroker, voo, "2026-03-01", "1.5", "508.2", "2", null, bank)));
         var cross = new TradeRequest("buy", usBroker.id, voo.id, "2026-03-01", new BigDecimal("1.5"), new BigDecimal("508.2"), new BigDecimal("2"),
-                null, bank.id, new BigDecimal("24500"), null, null);
+                null, bank.id, new BigDecimal("24500"), null, null, null);
         f.investmentService.create(ME, cross);
         eq("-24500", balance(bank));
         // 同幣別：依幣別小數位四捨五入（6.5 × 560.75 = 3,644.875）
@@ -215,5 +215,41 @@ class InvestmentTest {
         assertEquals(etf.id, restored.securityId, "同市場同代號沿用既有證券");
         assertTrue(f.accounts.stream().anyMatch(a -> a.id.equals(restored.accountId) && a.userId.equals(OTHER)));
         assertEquals(1, f.securities.stream().filter(s -> s.symbol.equals("0050")).count());
+    }
+
+    @Test
+    void openingPositionHasNoCashAndUsesPrincipalForReturn() {
+        String y = Dates.today().toString().substring(0, 4);
+        // 開始記帳前持有 0050 1,000 股、均價 150；當初投入本金 120,000（之前有配息再投入）
+        var opening = new TradeRequest("opening", broker.id, etf.id, y + "-01-02", new BigDecimal("1000"), new BigDecimal("150"),
+                new BigDecimal("99"), null, null, null, null, null, new BigDecimal("120000"));
+        Transaction t = f.investmentService.create(ME, opening);
+        assertTrue(t.entries.isEmpty(), "不影響現金");
+        eq("0", t.investment.fee);
+        eq("100000", balance(broker));
+        var p = HoldingCalculator.compute(f.ledger.investments(ME), null).get(broker.id, etf.id);
+        eq("1000", p.held);
+        eq("150000", p.cost);
+        eq("120000", p.invested);
+        eq("30000", p.priorGain);
+
+        // 現價 192.35：未實現 42,350；報酬率 =（42,350 + 30,000）÷ 120,000 = 60.3%
+        var h = f.investmentService.holdings(f.me, null).getFirst();
+        eq("150", h.avgCost());
+        eq("42350", h.unrealized());
+        eq("60.3", h.returnPct());
+        eq("60.3", f.investmentService.summary(f.me, null).returnPct());
+
+        // 之後照常賣出，以期初均價計算已實現損益
+        f.investmentService.create(ME, trade("sell", broker, etf, y + "-01-03", "100", "160", null, null, null));
+        eq("1000", HoldingCalculator.compute(f.ledger.investments(ME), null).get(broker.id, etf.id).realized);
+
+        // 沒填投入本金 → 等於股數 × 均價
+        var noPrincipal = new TradeRequest("opening", broker.id, voo.id, y + "-01-02", new BigDecimal("2"), new BigDecimal("500"),
+                null, null, null, null, null, null, null);
+        f.investmentService.create(ME, noPrincipal);
+        eq("1000", HoldingCalculator.compute(f.ledger.investments(ME), null).get(broker.id, voo.id).invested);
+        assertThrows(ResponseStatusException.class, () -> f.investmentService.create(ME, new TradeRequest("opening", broker.id, etf.id, y + "-01-02",
+                new BigDecimal("1"), new BigDecimal("1"), null, null, null, null, null, null, new BigDecimal("-1"))), "本金不能是負數");
     }
 }

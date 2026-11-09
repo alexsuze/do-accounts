@@ -1,7 +1,7 @@
 <template>
   <AppDialog :open="!!ui.tradeDialog" :title="editing ? '編輯投資交易' : '新增投資交易'" :width="660" no-auto-focus @update:open="v => !v && close()">
     <form id="trade-form" class="flex flex-col gap-4" novalidate @submit.prevent="save">
-      <div role="tablist" aria-label="交易類型" class="grid grid-cols-3 gap-1.5 rounded-xl border border-line bg-panel2 p-1 sm:grid-cols-6">
+      <div role="tablist" aria-label="交易類型" class="grid grid-cols-4 gap-1.5 rounded-xl border border-line bg-panel2 p-1 sm:grid-cols-7">
         <button v-for="t in TRADE_TYPES" :key="t.value" type="button" role="tab" :aria-selected="form.trade_type === t.value"
           class="h-10 rounded-[9px] border text-[13px] font-semibold transition-colors"
           :class="form.trade_type === t.value ? 'border-accent bg-panel text-accent' : 'border-transparent text-muted hover:text-text'"
@@ -60,6 +60,15 @@
           <SelectField v-if="tw" v-model="discount" label="手續費折扣" :options="DISCOUNTS" />
           <TextField v-model="form.fee" :label="tw ? '手續費（自動帶入）' : `手續費 · ${cur}`" inputmode="decimal" mono align="right" :error="errors.fee" @update:model-value="feeTouched = true" />
           <TextField v-model="form.tax" :label="tw && form.trade_type === 'sell' ? '證交稅（自動帶入）' : `稅 · ${cur}`" inputmode="decimal" mono align="right" :error="errors.tax" @update:model-value="taxTouched = true" />
+        </div>
+      </template>
+      <template v-else-if="form.trade_type === 'opening'">
+        <span class="text-sm text-muted">開始記帳前就持有的股票：只登錄股數、均價與投入本金，不會動到現金。日期可填投資帳戶的開戶日期。</span>
+        <div class="grid gap-3 sm:grid-cols-3">
+          <TextField v-model="form.quantity" label="股數" inputmode="decimal" mono align="right" :error="errors.quantity" required />
+          <TextField v-model="form.price" :label="`均價 · ${cur}`" inputmode="decimal" mono align="right" :error="errors.price" required />
+          <TextField v-model="form.principal" :label="`投入本金 · ${cur}`" inputmode="decimal" mono align="right" :error="errors.principal"
+            :placeholder="openingCost ? fmtMoney(openingCost) : '選填'" hint="空白＝股數 × 均價" />
         </div>
       </template>
       <div v-else-if="form.trade_type === 'cash_dividend'" class="grid gap-3 sm:grid-cols-3">
@@ -169,6 +178,8 @@ const preview = computed(() => {
   return { ...after, cash: cash?.cash ?? null, gross: cash?.gross ?? 0, oversell: !editing.value && after.oversell }
 })
 const money = (v, c = cur.value, sign = 'auto') => formatAmount(v, c, { sign })
+const fmtMoney = (v) => formatAmount(v, cur.value)
+const openingCost = computed(() => Number(form.quantity || 0) * Number(String(form.price || 0).replace(/,/g, '')))
 const summary = computed(() => {
   const p = preview.value
   if (!p) return []
@@ -181,10 +192,19 @@ const summary = computed(() => {
     const v = crossCurrency.value ? (form.settlement_amount ? money((p.cash < 0 ? -1 : 1) * Number(form.settlement_amount), settleAccount.value.currency, 'always') : '請填實際金額') : money(p.cash, cur.value, 'always')
     out.push({ k: label, v, total: true })
   }
+  if (t === 'opening') {
+    out.push({ k: '成本（股數 × 均價）', v: money(openingCost.value) })
+    const pr = num(form.principal)
+    out.push({ k: '投入本金（報酬率的分母）', v: money(pr ?? openingCost.value), total: true })
+    if (pr != null && Number(pr) !== openingCost.value) {
+      const diff = openingCost.value - Number(pr)
+      out.push({ k: '開始記帳前的損益（計入報酬率）', v: money(diff, cur.value, 'always'), cls: diff >= 0 ? 'text-inc' : 'text-exp' })
+    }
+  }
   if (t === 'sell' && p.realized != null && !editing.value && holding.value) {
     out.push({ k: '已實現損益（平均成本法）', v: money(p.realized, cur.value, 'always'), cls: p.realized >= 0 ? 'text-inc' : 'text-exp' })
   }
-  if (!editing.value && ['buy', 'sell', 'stock_dividend', 'split'].includes(t) && !p.oversell) {
+  if (!editing.value && ['buy', 'sell', 'stock_dividend', 'split', 'opening'].includes(t) && !p.oversell) {
     out.push({ k: '交易後持股', v: `${fmtQty(holding.value?.quantity ?? 0)} → ${fmtQty(p.quantity)} 股 · 均價 ${fmtPx(holding.value?.avg_cost ?? 0)} → ${fmtPx(p.avg)}` })
   }
   return out
@@ -193,6 +213,7 @@ const footNote = computed(() => {
   if (preview.value?.oversell) return '修正錯誤後才能儲存'
   if (form.trade_type === 'cash_dividend') return '計入收入分類「投資損益」'
   if (form.trade_type === 'fee') return '計入支出分類「手續費」'
+  if (form.trade_type === 'opening') return '不影響現金；報酬率以投入本金計算'
   if (!hasCash.value) return '沒有現金流動'
   return '儲存後同時產生交割帳戶的現金分錄'
 })
@@ -225,7 +246,7 @@ watch(() => ui.tradeDialog?.key, async (k) => {
   const firstInvest = accounts.list.find(a => a.kind === 'investment' && !a.archived_at)
   Object.assign(form, {
     trade_type: d.preset?.trade_type ?? 'buy', account_id: d.preset?.account_id ?? firstInvest?.id ?? null, date: today(),
-    quantity: '', price: '', fee: '', tax: '', settlement_account_id: null, settlement_amount: '', note: ''
+    quantity: '', price: '', fee: '', tax: '', settlement_account_id: null, settlement_amount: '', note: '', principal: ''
   })
   form.settlement_account_id = form.account_id
   holdings.value = (await api.get('/investments/holdings', { silent: true }).catch(() => ({ data: [] }))).data
@@ -243,7 +264,8 @@ watch(() => ui.tradeDialog?.key, async (k) => {
       quantity: iv.quantity != null ? String(Number(iv.quantity)) : '', price: iv.price != null ? String(Number(iv.price)) : '',
       fee: iv.fee != null ? String(Number(iv.fee)) : '', tax: iv.tax != null ? String(Number(iv.tax)) : '',
       settlement_account_id: settle ? settle.account_id : iv.account_id,
-      settlement_amount: settle ? String(Math.abs(Number(settle.amount))) : '', note: t.note ?? ''
+      settlement_amount: settle ? String(Math.abs(Number(settle.amount))) : '', note: t.note ?? '',
+      principal: iv.principal != null ? String(Number(iv.principal)) : ''
     })
   }
 })
@@ -311,7 +333,8 @@ async function save () {
     trade_type: form.trade_type, account_id: form.account_id, security_id: security.value.id, date: form.date,
     quantity: num(form.quantity), price: num(form.price), fee: num(form.fee), tax: num(form.tax),
     settlement_account_id: hasCash.value ? (form.settlement_account_id || form.account_id) : null,
-    settlement_amount: settlementAmount, note: form.note, version: editing.value?.version ?? null
+    settlement_amount: settlementAmount, note: form.note, version: editing.value?.version ?? null,
+    principal: form.trade_type === 'opening' ? num(form.principal) : null
   }
   busy.value = 'save'
   try {

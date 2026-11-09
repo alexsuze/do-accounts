@@ -272,14 +272,15 @@ db.transactions.aggregate([
 |---|---|---|
 | account_id | string | 持有證券的投資帳戶（kind = `investment`） |
 | security_id | string | |
-| trade_type | string | `buy` / `sell` / `cash_dividend` / `stock_dividend` / `split` / `fee` |
+| trade_type | string | `buy` / `sell` / `cash_dividend` / `stock_dividend` / `split` / `fee` / `opening`（期初持股） |
 | quantity | Decimal128 | 股數（買、賣、股票股利）；`cash_dividend` 為參與配息的股數；`split` 存分割比例（1 股變幾股） |
 | price | Decimal128 | 證券幣別的成交價；`cash_dividend` 為每股配息 |
 | fee / tax | Decimal128 | 證券幣別 |
+| principal | Decimal128 / null | 只有 `opening`：投入本金（報酬率的分母）；null 表示等於股數 × 均價 |
 
 交割帳戶（`entries[0].account_id`）可以是投資帳戶本身（券商交割戶），也可以是另一個銀行帳戶。交割帳戶幣別與證券不同時（例如台幣帳戶買美股），由使用者填實際扣款／入帳金額；相同時依幣別小數位四捨五入。
 
-分錄角色：`buy`／`sell` 用 `settlement`（資產轉換，不計入收支）；`cash_dividend` 用 `main` ＋ 收入分類「投資損益」（`system_key = investment_pnl`）、`fee` 用 `main` ＋ 支出分類「手續費」，因此直接沿用既有的收支統計、預算與報表。`stock_dividend`、`split` 沒有現金流動，`entries` 為空陣列。投資交易的 `title` 由系統產生（「買進 0050 元大台灣50」）。
+分錄角色：`buy`／`sell` 用 `settlement`（資產轉換，不計入收支）；`cash_dividend` 用 `main` ＋ 收入分類「投資損益」（`system_key = investment_pnl`）、`fee` 用 `main` ＋ 支出分類「手續費」，因此直接沿用既有的收支統計、預算與報表。`stock_dividend`、`split`、`opening` 沒有現金流動，`entries` 為空陣列。`opening`（期初持股）用於開始記帳前就持有的股票：`quantity` 股數、`price` 均價、`principal` 投入本金。投資交易的 `title` 由系統產生（「買進 0050 元大台灣50」）。
 
 **securities**（全站共用，不分使用者）
 
@@ -702,9 +703,12 @@ for trade in 該帳戶該證券的投資交易（依 date、created_at 排序）
   stock_dividend: held += qty（成本不變）
   split:          held ×= ratio
   fee:            cost += fee
+  opening:        cost += qty × 均價；held += qty
+                  invested += principal（未填時 = qty × 均價）
+                  priorGain += qty × 均價 − principal（開始記帳前已累積的損益）
 市值 = held × 最新收盤價
 未實現損益 = 市值 − cost
-報酬率 = (未實現 + 已實現 + 股利) / 累計買進成本
+報酬率 = (未實現 + 已實現 + 股利 + priorGain) / 累計投入（買進＋費用＋期初持股的投入本金）
 ```
 
 - 新增、修改、刪除投資交易時，重新計算該證券的整段歷史；若任何時間點持股變成負數就回 422（修改過去的交易也會檢查）。

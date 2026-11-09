@@ -80,9 +80,9 @@ public class ExportService {
     }
 
     public static final List<String> TRADE_HEADER = List.of("日期", "類型", "投資帳戶", "市場", "代號", "名稱", "股數", "價格",
-            "手續費", "稅", "交割帳戶", "交割金額", "幣別", "備註");
+            "手續費", "稅", "投入本金", "交割帳戶", "交割金額", "幣別", "備註");
     private static final Map<String, String> TRADE = Map.of("buy", "買進", "sell", "賣出", "cash_dividend", "現金股利",
-            "stock_dividend", "股票股利", "split", "分割", "fee", "費用");
+            "stock_dividend", "股票股利", "split", "分割", "fee", "費用", "opening", "期初持股");
 
     /** 投資交易 CSV（SA FR-10.9）：股數、價格為證券幣別；交割金額為交割帳戶幣別（流入為正） */
     public void writeTradesCsv(String userId, List<Transaction> txs, Map<String, com.doaccounts.model.Security> secs, OutputStream out) throws IOException {
@@ -100,7 +100,7 @@ public class ExportService {
             Account settle = cash == null ? null : acc.get(cash.accountId);
             line(w, List.of(t.date, TRADE.getOrDefault(iv.tradeType, iv.tradeType), safe(holder == null ? "" : holder.name),
                     sec == null ? "" : sec.market, safe(sec == null ? "" : sec.symbol), safe(sec == null ? "" : sec.name),
-                    plain(iv.quantity), plain(iv.price), plain(iv.fee), plain(iv.tax),
+                    plain(iv.quantity), plain(iv.price), plain(iv.fee), plain(iv.tax), plain(iv.principal),
                     safe(settle == null ? "" : settle.name), cash == null ? "" : cash.amount.toPlainString(),
                     settle == null ? "" : settle.currency, safe(t.note == null ? "" : t.note)));
         }
