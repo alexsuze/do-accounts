@@ -9,7 +9,13 @@ export const useUiStore = defineStore('ui', {
   state: () => ({
     mode: readMode(storage),
     pnl: readPnl(storage),
-    systemDark: !!media?.matches
+    systemDark: !!media?.matches,
+    /** 交易有異動時 +1，頁面 watch 它來重新載入（記帳視窗在任何頁面都能開） */
+    ledgerVersion: 0,
+    /** 記帳視窗：null 為關閉；{ transaction?, preset? } 為開啟 */
+    txDialog: null,
+    /** 全域計算機（SA FR-11.1）：target 為帶入結果的 callback */
+    calculator: { open: false, target: null, initial: '' }
   }),
   getters: {
     dark: (s) => resolveDark(s.mode, s.systemDark)
@@ -31,6 +37,22 @@ export const useUiStore = defineStore('ui', {
     },
     toggle () {
       this.setMode(nextToggleMode(this.dark))
+    },
+    ledgerChanged () {
+      this.ledgerVersion++
+    },
+    /** 開啟記帳視窗。transaction：要編輯的交易；preset：新增時的預設值（例如帳戶、複製的內容） */
+    openTx ({ transaction = null, preset = null } = {}) {
+      this.txDialog = { transaction, preset, key: Date.now() }
+    },
+    closeTx () {
+      this.txDialog = null
+    },
+    openCalculator (target = null, initial = '') {
+      this.calculator = { open: true, target, initial }
+    },
+    closeCalculator () {
+      this.calculator = { open: false, target: null, initial: '' }
     },
     setPnl (scheme) {
       this.pnl = scheme

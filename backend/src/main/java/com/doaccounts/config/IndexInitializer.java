@@ -1,5 +1,8 @@
 package com.doaccounts.config;
 
+import com.doaccounts.model.Account;
+import com.doaccounts.model.Category;
+import com.doaccounts.model.Transaction;
 import com.doaccounts.model.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,5 +45,11 @@ public class IndexInitializer {
 
     void ensureIndexes() {
         mongo.indexOps(User.class).createIndex(new Index().on("google_sub", Sort.Direction.ASC).unique());
+        mongo.indexOps(Account.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("kind", Sort.Direction.ASC).on("order", Sort.Direction.ASC));
+        mongo.indexOps(Category.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("kind", Sort.Direction.ASC).on("order", Sort.Direction.ASC));
+        // SD 2.5：依日期查明細、依帳戶算餘額、依分類篩選
+        mongo.indexOps(Transaction.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("date", Sort.Direction.DESC));
+        mongo.indexOps(Transaction.class).createIndex(new Index().on("entries.account_id", Sort.Direction.ASC).on("date", Sort.Direction.ASC));
+        mongo.indexOps(Transaction.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("category_id", Sort.Direction.ASC).on("date", Sort.Direction.DESC));
     }
 }

@@ -1,10 +1,10 @@
 <template>
   <nav aria-label="主選單" class="fixed inset-x-0 bottom-0 z-40 flex h-[76px] items-center justify-around border-t border-line bg-panel px-3 pb-3.5 pt-1.5 lg:hidden">
     <RouterLink v-for="t in left" :key="t.to" :to="t.to" :class="tabClass(t.to)"><component :is="t.icon" :size="20" aria-hidden="true" />{{ t.label }}</RouterLink>
-    <RouterLink to="/transactions" aria-label="記帳"
-      class="-mt-6 flex size-14 items-center justify-center rounded-[18px] bg-accent text-accent-ink shadow-[0_0_0_6px_var(--bg),0_0_24px_var(--accent-soft)]">
+    <button type="button" aria-label="記帳" class="-mt-6 flex size-14 items-center justify-center rounded-[18px] bg-accent text-accent-ink shadow-[0_0_0_6px_var(--bg),0_0_24px_var(--accent-soft)]"
+      @click="ui.openTx()">
       <Plus :size="24" aria-hidden="true" />
-    </RouterLink>
+    </button>
     <RouterLink :to="right.to" :class="tabClass(right.to)"><component :is="right.icon" :size="20" aria-hidden="true" />{{ right.label }}</RouterLink>
     <button type="button" :class="tabClass(null)" @click="more = true"><Ellipsis :size="20" aria-hidden="true" />更多</button>
   </nav>
@@ -30,10 +30,12 @@ import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRo
 import { ChartColumn, Ellipsis, House, List, Plus } from 'lucide-vue-next'
 import { NAV } from '../router'
 import { useAuthStore } from '../stores/auth'
+import { useUiStore } from '../stores/ui'
 
 // 手機與平板（< 1024px）的底部導覽＋「更多」抽屜（SD 5.6）
 const route = useRoute()
 const auth = useAuthStore()
+const ui = useUiStore()
 const more = ref(false)
 const left = [{ to: '/', label: '總覽', icon: House }, { to: '/transactions', label: '明細', icon: List }]
 const right = { to: '/reports', label: '報表', icon: ChartColumn }

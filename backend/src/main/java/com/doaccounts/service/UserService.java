@@ -33,14 +33,16 @@ public class UserService {
     private final GoogleVerifier google;
     private final TokenService tokens;
     private final EmailService email;
+    private final CategoryService categories;
     private final AppProperties props;
 
     public UserService(UserRepository repo, GoogleVerifier google, TokenService tokens,
-                       EmailService email, AppProperties props) {
+                       EmailService email, CategoryService categories, AppProperties props) {
         this.repo = repo;
         this.google = google;
         this.tokens = tokens;
         this.email = email;
+        this.categories = categories;
         this.props = props;
     }
 
@@ -72,6 +74,7 @@ public class UserService {
         if (User.DISABLED.equals(u.status)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "此帳號已停用，請聯絡管理員");
         }
+        categories.ensureDefaults(u.id); // 第一次被核准登入時建立預設分類（SA FR-1.3）
         return new LoginResult(tokens.issue(u.id), u);
     }
 
