@@ -136,57 +136,71 @@ public class TransactionService {
         return list.size();
     }
 
-    private void fill(String userId, Transaction t, TransactionRequest req) {
+    /** 檢查並把 request 填進交易（含重建分錄）。錯誤以 FieldException 標出欄位，多筆編輯會用到。 */
+    void fill(String userId, Transaction t, TransactionRequest req) {
         String kind = req.kind();
-        if (!KINDS.contains(kind)) throw bad("交易類型需為收入、支出或轉帳");
-        String date = Dates.check(req.date(), "日期");
-        Account from = usable(userId, req.accountId(), date);
+        if (!KINDS.contains(kind)) throw field("kind", bad("交易類型需為收入、支出或轉帳"));
+        String date = on("date", () -> Dates.check(req.date(), "日期"));
+        Account from = on("account_id", () -> usable(userId, req.accountId(), date));
 
         String title = req.title() == null ? "" : req.title().trim();
         if (title.isEmpty() && Transaction.TRANSFER.equals(kind)) title = "轉帳";
-        if (title.isEmpty() || title.length() > 100) throw bad("項目名稱需為 1～100 字");
+        if (title.isEmpty() || title.length() > 100) throw field("title", bad("項目名稱需為 1～100 字"));
         String note = req.note() == null ? "" : req.note().trim();
-        if (note.length() > 500) throw bad("備註最多 500 字");
+        if (note.length() > 500) throw field("note", bad("備註最多 500 字"));
 
-        BigDecimal amount = Currencies.check(req.amount(), from.currency, true, "金額");
+        BigDecimal amount = on("amount", () -> Currencies.check(req.amount(), from.currency, true, "金額"));
         String categoryId = null;
         List<Entry> entries;
         if (Transaction.TRANSFER.equals(kind)) {
-            Account to = usable(userId, req.toAccountId(), date);
-            if (to.id.equals(from.id)) throw bad("轉出與轉入帳戶不能相同");
+            Account to = on("to_account_id", () -> usable(userId, req.toAccountId(), date));
+            if (to.id.equals(from.id)) throw field("to_account_id", bad("轉出與轉入帳戶不能相同"));
             BigDecimal toAmount;
             if (from.currency.equals(to.currency)) {
-                if (req.toAmount() != null && req.toAmount().compareTo(amount) != 0) throw bad("同幣別轉帳的轉入金額必須等於轉出金額");
+                if (req.toAmount() != null && req.toAmount().compareTo(amount) != 0) throw field("to_amount", bad("同幣別轉帳的轉入金額必須等於轉出金額"));
                 toAmount = amount;
             } else {
-                if (req.toAmount() == null) throw bad("跨幣別轉帳需要填寫轉入金額（" + to.currency + "）");
-                toAmount = Currencies.check(req.toAmount(), to.currency, true, "轉入金額");
+                if (req.toAmount() == null) throw field("to_amount", bad("跨幣別轉帳需要填寫轉入金額（" + to.currency + "）"));
+                toAmount = on("to_amount", () -> Currencies.check(req.toAmount(), to.currency, true, "轉入金額"));
             }
             BigDecimal fee = null;
             String feeCategoryId = null;
             if (req.fee() != null && req.fee().signum() != 0) {
-                fee = Currencies.check(req.fee(), from.currency, true, "手續費");
-                Category fc = req.feeCategoryId() == null || req.feeCategoryId().isBlank()
+                fee = on("fee", () -> Currencies.check(req.fee(), from.currency, true, "手續費"));
+                Category fc = on("fee", () -> req.feeCategoryId() == null || req.feeCategoryId().isBlank()
                         ? categories.system(userId, Category.EXPENSE, Category.SYS_FEE)
-                        : categories.get(userId, req.feeCategoryId());
-                if (!Category.EXPENSE.equals(fc.kind)) throw bad("手續費分類必須是支出分類");
+                        : categories.get(userId, req.feeCategoryId()));
+                if (!Category.EXPENSE.equals(fc.kind)) throw field("fee", bad("手續費分類必須是支出分類"));
                 feeCategoryId = fc.id;
             }
             entries = buildTransferEntries(from.id, amount, to.id, toAmount, fee, feeCategoryId);
         } else {
-            Category c = categories.get(userId, req.categoryId());
-            if (!kind.equals(c.kind)) throw bad("分類「" + c.name + "」不是" + kindLabel(kind) + "分類");
+            Category c = on("category_id", () -> categories.get(userId, req.categoryId()));
+            if (!kind.equals(c.kind)) throw field("category_id", bad("分類「" + c.name + "」不是" + kindLabel(kind) + "分類"));
             categoryId = c.id;
             entries = List.of(buildMainEntry(kind, from.id, amount));
         }
+        List<String> tags = on("tags", () -> normalizeTags(req.tags()));
 
         t.kind = kind;
         t.date = date;
         t.title = title;
         t.note = note;
-        t.tags = normalizeTags(req.tags());
+        t.tags = tags;
         t.categoryId = categoryId;
         t.entries = new ArrayList<>(entries);
+    }
+
+    private static <T> T on(String field, java.util.function.Supplier<T> s) {
+        try {
+            return s.get();
+        } catch (ResponseStatusException e) {
+            throw FieldException.of(field, e);
+        }
+    }
+
+    private static FieldException field(String field, ResponseStatusException e) {
+        return FieldException.of(field, e);
     }
 
     /** 收入為正、支出為負的單一分錄（SD 2.5 規則表） */

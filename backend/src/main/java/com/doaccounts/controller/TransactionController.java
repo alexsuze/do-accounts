@@ -3,6 +3,9 @@ package com.doaccounts.controller;
 import com.doaccounts.config.AuthFilter;
 import com.doaccounts.model.Transaction;
 import com.doaccounts.model.User;
+import com.doaccounts.service.TransactionBatchService;
+import com.doaccounts.service.TransactionBatchService.BatchRequest;
+import com.doaccounts.service.TransactionBatchService.BatchResult;
 import com.doaccounts.service.TransactionService;
 import com.doaccounts.service.TransactionService.Page;
 import com.doaccounts.service.TransactionService.Suggestion;
@@ -27,9 +30,11 @@ import java.util.Map;
 public class TransactionController {
 
     private final TransactionService service;
+    private final TransactionBatchService batch;
 
-    public TransactionController(TransactionService service) {
+    public TransactionController(TransactionService service, TransactionBatchService batch) {
         this.service = service;
+        this.batch = batch;
     }
 
     @GetMapping
@@ -54,6 +59,12 @@ public class TransactionController {
     @GetMapping("/suggest")
     public List<Suggestion> suggest(@RequestAttribute(AuthFilter.USER) User user, @RequestParam String q) {
         return service.suggest(user.id, q);
+    }
+
+    /** 表格模式一次儲存（SD 4.2.1）：全部檢查通過才寫入 */
+    @PostMapping("/batch")
+    public BatchResult batch(@RequestAttribute(AuthFilter.USER) User user, @RequestBody BatchRequest req) {
+        return batch.save(user.id, req);
     }
 
     public record BulkDeleteRequest(List<String> ids) {}

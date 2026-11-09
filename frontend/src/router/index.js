@@ -12,7 +12,7 @@ const routes = [
     children: [
       { path: '', name: 'dashboard', component: () => import('../pages/DashboardPage.vue'), meta: { title: '總覽' } },
       { path: 'transactions', name: 'transactions', component: () => import('../pages/TransactionsPage.vue'), meta: { title: '明細' } },
-      { path: 'transactions/grid', name: 'grid', ...soon('表格編輯', 1.5) },
+      { path: 'transactions/grid', name: 'grid', component: () => import('../pages/TransactionGridPage.vue'), meta: { title: '多筆編輯', wide: true } },
       { path: 'accounts', name: 'accounts', component: () => import('../pages/AccountsPage.vue'), meta: { title: '帳戶' } },
       { path: 'accounts/:id', name: 'account', component: () => import('../pages/AccountDetailPage.vue'), meta: { title: '帳戶詳細' } },
       { path: 'categories', name: 'categories', component: () => import('../pages/CategoriesPage.vue'), meta: { title: '分類' } },

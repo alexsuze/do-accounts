@@ -46,6 +46,7 @@ class Fixture {
     final AccountService accountService = new AccountService(accountRepo, ledger);
     final CategoryService categoryService = new CategoryService(categoryRepo, ledger);
     final TransactionService txService = new TransactionService(txRepo, ledger, accountService, categoryService);
+    final TransactionBatchService batchService = new TransactionBatchService(txRepo, ledger, txService);
 
     private int seq;
 
@@ -65,6 +66,7 @@ class Fixture {
         when(txRepo.save(any(Transaction.class))).thenAnswer(inv -> {
             Transaction t = inv.getArgument(0);
             t.version = t.version == null ? 0L : t.version + 1;
+            if (t.id != null) transactions.replaceAll(x -> x.id.equals(t.id) ? t : x); // 同 id 的新物件取代舊的（像資料庫一樣）
             return store(transactions, t, "t");
         });
         when(txRepo.findById(anyString())).thenAnswer(inv -> transactions.stream().filter(t -> t.id.equals(inv.getArgument(0))).findFirst());
@@ -97,6 +99,17 @@ class Fixture {
                     .filter(t -> f.categoryIds() == null || f.categoryIds().isEmpty() || f.categoryIds().contains(t.categoryId))
                     .toList();
         });
+        doAnswer(inv -> {
+            Transaction o = inv.getArgument(0);
+            transactions.removeIf(t -> t.id.equals(o.id));
+            transactions.add(o);
+            return null;
+        }).when(ledger).restore(any(Transaction.class));
+        doAnswer(inv -> {
+            Collection<?> ids = inv.getArgument(1);
+            transactions.removeIf(t -> t.userId.equals(inv.getArgument(0)) && ids.contains(t.id));
+            return null;
+        }).when(ledger).removeByIds(anyString(), anyCollection());
         when(ledger.recent(anyString(), anyInt())).thenAnswer(inv -> newestFirst(mine(inv.getArgument(0))).stream().limit((int) inv.getArgument(1)).toList());
         when(ledger.titleStartsWith(anyString(), anyString(), anyInt())).thenAnswer(inv -> newestFirst(mine(inv.getArgument(0))).stream()
                 .filter(t -> t.title.startsWith(inv.getArgument(1))).toList());

@@ -87,7 +87,7 @@ import { toast } from '../stores/toast'
 import { TX_KINDS } from '../utils/labels'
 import { today } from '../utils/date'
 import { digitsOf } from '../utils/money'
-import { evaluate, toAmountString } from '../utils/expr'
+import { decimalsError, evaluate, toAmountString } from '../utils/expr'
 
 // 記帳視窗（SA UC-02、FR-3.1～3.8）。開關由 ui.txDialog 控制，任何頁面都能開
 const LAST_ACCOUNT = 'do-accounts:last-account'
@@ -204,6 +204,8 @@ function amountOf (field, currency, label, required) {
   try {
     const v = toAmountString(raw, digitsOf(currency))
     if (Number(v) <= 0) { errors[field] = `${label}必須大於 0`; return null }
+    const dec = decimalsError(raw, digitsOf(currency), currency)
+    if (dec) { errors[field] = dec; return null }
     return v
   } catch (e) { errors[field] = e.message; return null }
 }
