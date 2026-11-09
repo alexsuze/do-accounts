@@ -1,0 +1,100 @@
+/* Tailwind 進入點與設計 tokens（SD 5.3、5.4）。頁面只用 token class，不寫死色碼 */
+@import "tailwindcss";
+
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource/noto-sans-tc/400.css";
+@import "@fontsource/noto-sans-tc/700.css";
+
+/* 深色模式由 <html class="dark"> 控制 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #F3F6FA;
+  --panel: #FFFFFF;
+  --panel2: #F7F9FC;
+  --line: #DDE4EE;
+  --text: #0F172A;
+  --muted: #475569;
+  --accent: #0E7490;
+  --accent-ink: #FFFFFF;
+  --accent-soft: rgba(14, 116, 144, .10);
+  --inc: #047857;
+  --exp: #BE123C;
+  --warn: #B45309;
+  --inc-soft: rgba(4, 120, 87, .08);
+  --exp-soft: rgba(190, 18, 60, .08);
+  --warn-soft: rgba(180, 83, 9, .08);
+  --dot: rgba(15, 23, 42, .06);
+  --scrim: rgba(15, 23, 42, .45);
+  --c1: #0891B2; --c2: #2563EB; --c3: #7C3AED; --c4: #D97706; --c5: #DB2777; --c6: #94A3B8;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #080C14;
+  --panel: #0F1520;
+  --panel2: #141C2A;
+  --line: #1E2A3C;
+  --text: #E6EDF7;
+  --muted: #93A3B8;
+  --accent: #22D3EE;
+  --accent-ink: #04202A;
+  --accent-soft: rgba(34, 211, 238, .12);
+  --inc: #34D399;
+  --exp: #FB7185;
+  --warn: #FBBF24;
+  --inc-soft: rgba(52, 211, 153, .10);
+  --exp-soft: rgba(251, 113, 133, .12);
+  --warn-soft: rgba(251, 191, 36, .10);
+  --dot: rgba(148, 163, 184, .10);
+  --scrim: rgba(3, 6, 12, .72);
+  --c1: #22D3EE; --c2: #60A5FA; --c3: #A78BFA; --c4: #FBBF24; --c5: #F472B6; --c6: #64748B;
+  color-scheme: dark;
+}
+
+/* 設定「紅收綠支」時對調收入／支出顏色（SD 5.3），<html> 加上 flip-pnl */
+.flip-pnl { --inc: #BE123C; --exp: #047857; --inc-soft: rgba(190, 18, 60, .08); --exp-soft: rgba(4, 120, 87, .08); }
+.dark.flip-pnl { --inc: #FB7185; --exp: #34D399; --inc-soft: rgba(251, 113, 133, .12); --exp-soft: rgba(52, 211, 153, .10); }
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-inc: var(--inc);
+  --color-exp: var(--exp);
+  --color-warn: var(--warn);
+  --color-inc-soft: var(--inc-soft);
+  --color-exp-soft: var(--exp-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-scrim: var(--scrim);
+  --font-sans: "Inter", "Noto Sans TC", system-ui, sans-serif;
+  --font-head: "Space Grotesk", "Noto Sans TC", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --radius-card: 14px;
+}
+
+@utility num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+@utility lbl { font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+@utility glow { box-shadow: 0 0 0 1px var(--accent-soft), 0 0 32px var(--accent-soft); }
+@utility dot-grid { background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; }
+
+@layer base {
+  html, body { background-color: var(--bg); color: var(--text); }
+  body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}

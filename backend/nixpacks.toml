@@ -1,0 +1,3 @@
+# Railway (Nixpacks) 預設 JDK 17，專案需要 21
+[phases.setup]
+nixPkgs = ["jdk21"]
