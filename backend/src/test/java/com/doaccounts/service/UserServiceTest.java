@@ -33,10 +33,11 @@ class UserServiceTest {
     private final UserRepository repo = mock(UserRepository.class);
     private final GoogleVerifier google = mock(GoogleVerifier.class);
     private final EmailService email = mock(EmailService.class);
+    private final CategoryService categories = mock(CategoryService.class);
     private final AppProperties props = new AppProperties(null, null, "https://app.example.test/",
             new Auth("cid", "Boss@Example.test", "0123456789abcdef0123456789abcdef"));
     private final TokenService tokens = new TokenService(props);
-    private final UserService service = new UserService(repo, google, tokens, email, props);
+    private final UserService service = new UserService(repo, google, tokens, email, categories, props);
     private final List<User> users = new ArrayList<>();
 
     UserServiceTest() {
@@ -58,6 +59,7 @@ class UserServiceTest {
         assertEquals(User.ACTIVE, r.user().status);
         assertEquals("TWD", r.user().baseCurrency);
         assertEquals(r.user().id, service.authenticate(r.token()).id);
+        verify(categories).ensureDefaults(r.user().id);
     }
 
     @Test
@@ -65,6 +67,7 @@ class UserServiceTest {
         assertThrows(ResponseStatusException.class, () -> service.login("amy"), "待核准");
         User amy = users.get(0);
         assertEquals(User.PENDING, amy.status);
+        verify(categories, never()).ensureDefaults(amy.id);
 
         User boss = service.login("boss").user();
         assertThrows(ResponseStatusException.class, () -> service.setStatus(amy, boss.id, User.DISABLED), "非管理員不能管理");

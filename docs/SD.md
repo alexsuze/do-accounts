@@ -167,7 +167,6 @@ do-accounts/
 | admin | boolean | `ADMIN_EMAIL` 的帳號登入時自動設為 true 並啟用 |
 | base_currency | string | 本位幣，預設 `TWD` |
 | settings | object | `{ week_start, budget_warn_pct, income_color_scheme, … }` |
-| initialized | boolean | 是否已建立預設分類（第一次被核准登入時建立） |
 | created_at / last_login_at | Date | |
 
 ### 2.3 accounts
@@ -199,7 +198,7 @@ do-accounts/
 | kind | string | `income` / `expense` |
 | parent_id | string / null | 上層分類；只允許兩層（service 檢查上層的 `parent_id` 必須是 null） |
 | name | string | 1～30 字，同上層內不重複 |
-| icon | string | Material Icons 名稱 |
+| icon | string | 圖示代碼（前端 `utils/icons.js` 對照到 lucide 圖示，例如 `utensils`、`bus`） |
 | color | string | `#RRGGBB`（存大寫） |
 | order | int | |
 | system_key | string / null | `other` / `adjustment` / `fee` / `investment_pnl`；非 null 不可刪除 |
@@ -406,13 +405,14 @@ erDiagram
 | PUT | `/api/accounts/{id}` | 完整覆寫編輯；有交易時改幣別 → 409；`opening_balance` 可隨時改；`opening_date` 晚於最早交易日期 → 422 |
 | DELETE | `/api/accounts/{id}` | 有交易 → 409「請改用封存」 |
 | POST | `/api/accounts/{id}/archive`、`/unarchive` | 封存／取消封存 |
-| GET | `/api/accounts/{id}/history?from&to` | 每日餘額（帳戶頁走勢圖） |
+| GET | `/api/accounts/{id}/history?days=90` | 最近 N 天每日結束時的餘額（帳戶詳細頁走勢圖） |
+| GET | `/api/accounts/{id}/ledger?page&size` | 此帳戶的交易（新到舊），每筆含 `amount`（對此帳戶的淨影響）與 `balance_after`（交易後餘額），另回傳含餘額的 `account` |
 
 ### 3.4 交易 `/api/transactions`
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/api/transactions` | 篩選 `from, to, account_id, category_id, kind, tag, q, min, max`（可複選者用逗號分隔）、分頁；另回傳 `daily_totals` |
+| GET | `/api/transactions` | 篩選 `from, to, account_id, category_id`（含子類）`, kind, tag, q`（可複選者用逗號分隔）、分頁 `page, size`（≤ 200）。回傳 `{ items, page, size, total, summary, daily_totals }`：`summary` 為整段篩選範圍的收支，依幣別分開 `{ TWD: { income, expense } }`；`daily_totals` 為 `[{ date, by_currency }]`。收支只計 `main` 與 `fee` 分錄，支出以正數表示金額大小 |
 | POST | `/api/transactions` | 新增收入／支出／轉帳 |
 | PUT | `/api/transactions/{id}` | 完整覆寫，body 需帶 `version`；版本不符 → 409「此筆紀錄已在其他地方被修改，請重新整理」（`kind = investment` 的請改走投資 API → 422） |
 | DELETE | `/api/transactions/{id}` | |
@@ -463,7 +463,7 @@ public record TransactionRequest(
 
 | 方法 | 路徑 | 回傳 |
 |---|---|---|
-| GET | `/api/reports/dashboard` | 淨資產三數字、本月收支、預算概況、最近 5 筆交易 |
+| GET | `/api/reports/dashboard` | 淨資產三數字、本月收支、最近 5 筆交易（預算概況於階段 2 加入）。**階段 1 尚無匯率**：淨資產與本月收支只計本位幣，外幣帳戶列在 `foreign_accounts`、外幣收支列在 `month_other_currencies`，階段 2 起依匯率換算併入 |
 | GET | `/api/reports/net-worth?from=YYYY-MM&to=YYYY-MM` | `[{ month, assets, liabilities, investments, net_worth }]` |
 | GET | `/api/reports/breakdown?from&to&kind` | 分類（含子類）金額與百分比 |
 | GET | `/api/reports/daily?month=` | `[{ date, income, expense }]` 與當月合計 |
@@ -532,7 +532,7 @@ sequenceDiagram
     alt pending / disabled
         A-->>W: 403「已送出申請，請等待管理員核准」/「此帳號已停用」
     else active
-        A->>DB: 第一次登入：建立預設分類（initialized = true）
+        A->>DB: 該使用者還沒有任何分類時，建立預設分類（CategoryService.ensureDefaults）
         A-->>W: { token, user }
         W->>W: localStorage 'do-accounts:auth' 存 token 與 user
     end
@@ -886,8 +886,8 @@ sequenceDiagram
 | `StatCard` | 小標籤＋大數字＋說明（總覽、預算、投資、帳戶詳細的摘要格） | — |
 | `SegmentedControl` | 分段切換（類型、期間、主題、收支顏色） | ToggleGroup |
 | `TabList` | 頁籤（分類支出／收入、記帳類型） | Tabs |
-| `TextField`／`SelectField`／`ComboboxField` | 有標籤、提示文字、錯誤訊息的輸入元件 | Select、Combobox |
-| `DateField` | 日期輸入＋月曆；可設定最早可選日期（開戶日期） | DatePicker |
+| `FormField`／`TextField`／`SelectField` | 有標籤、提示文字、錯誤訊息的輸入元件；必填以 `aria-required` 標示，星號不算進標籤文字 | Select |
+| `DateField` | 日期輸入；`min` 擋住開戶日期之前（SA FR-2.7）。採瀏覽器原生 `<input type="date">`：手機有系統滾輪、桌面可鍵盤輸入，無障礙由瀏覽器提供 | —（原生） |
 | `MoneyInput` | 金額輸入，支援算式（`120+35`）與開啟計算機；依幣別小數位數顯示 | — |
 | `Switch` | 開關（帳戶顯示） | Switch |
 | `AppDialog` | 對話框；手機全螢幕 | Dialog |
