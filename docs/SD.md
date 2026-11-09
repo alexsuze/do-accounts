@@ -178,8 +178,8 @@ UI 元件庫等 UI 設計（頁面示意圖）確認後再決定，不影響後�
 | name | string | 1～30 字，同使用者內不重複 |
 | kind | string | `cash` / `bank` / `credit_card` / `e_wallet` / `investment` / `loan` / `other` |
 | currency | string | ISO 4217（`TWD` / `USD` / `JPY`…）；有交易後不可變更 |
-| opening_balance | Decimal128 | 初始餘額 |
-| opening_date | string | `YYYY-MM-DD`，資產趨勢從這天開始計入 |
+| opening_balance | Decimal128 | 初始餘額；信用卡／貸款為負數。有交易後仍可修改（餘額即時計算，自動生效） |
+| opening_date | string | `YYYY-MM-DD`，開戶日期；資產趨勢從這天開始計入。所有交易日期必須 ≥ 此日期；修改時不可晚於該帳戶最早的交易日期（否則 422） |
 | order | int | 同 kind 內的顯示順序 |
 | visible | boolean | 首頁是否顯示 |
 | archived_at | Date / null | 非 null 即封存 |
@@ -401,7 +401,7 @@ erDiagram
 | GET | `/api/accounts` | 含計算出的 `balance` 與 `balance_in_base`；`?include_archived=true` |
 | POST | `/api/accounts` | 新增 |
 | PUT | `/api/accounts/reorder` | `{ kind, ids }` 同一 kind 的新順序（路由放在 `/{id}` 之前） |
-| PUT | `/api/accounts/{id}` | 完整覆寫編輯；有交易時改幣別 → 409 |
+| PUT | `/api/accounts/{id}` | 完整覆寫編輯；有交易時改幣別 → 409；`opening_balance` 可隨時改；`opening_date` 晚於最早交易日期 → 422 |
 | DELETE | `/api/accounts/{id}` | 有交易 → 409「請改用封存」 |
 | POST | `/api/accounts/{id}/archive`、`/unarchive` | 封存／取消封存 |
 | GET | `/api/accounts/{id}/history?from&to` | 每日餘額（帳戶頁走勢圖） |
@@ -550,6 +550,7 @@ create(userId, req):
   1. validate：
      - date 為合法 YYYY-MM-DD；title 1～100 字；amount > 0，小數位數不超過帳戶幣別的位數
      - 帳戶屬於 userId 且未封存（否則 404 / 422）
+     - date ≥ 每個相關帳戶的 opening_date（收支帳戶、轉出與轉入帳戶；投資另含投資帳戶與交割帳戶），否則 422「交易日期不能早於帳戶開戶日期（YYYY-MM-DD）」
      - 收支：category 屬於 userId，且 category.kind == req.kind
      - 轉帳：account ≠ toAccount；幣別相同時 toAmount 必須為 null 或等於 amount；幣別不同時 toAmount 必填
   2. buildEntries(req)：依 2.5 規則表產生分錄
