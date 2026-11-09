@@ -29,12 +29,14 @@ public class DashboardService {
     private final LedgerQueries ledger;
     private final FxService fx;
     private final BudgetService budgets;
+    private final InvestmentService investments;
 
-    public DashboardService(AccountService accounts, LedgerQueries ledger, FxService fx, BudgetService budgets) {
+    public DashboardService(AccountService accounts, LedgerQueries ledger, FxService fx, BudgetService budgets, InvestmentService investments) {
         this.accounts = accounts;
         this.ledger = ledger;
         this.fx = fx;
         this.budgets = budgets;
+        this.investments = investments;
     }
 
     /** 預算概況：總預算（可能為 null）與使用率最高的幾個分類 */
@@ -43,8 +45,9 @@ public class DashboardService {
     /**
      * @param ratesDate 換算外幣帳戶用的匯率中最舊的日期（FR-8.3 在畫面標示匯率日期）；沒有外幣帳戶時為 null
      * @param hiddenAccounts 設為「總覽隱藏」而未計入資產負債的帳戶數（有餘額的才算）
+     * @param investments 投資市值（已含在 assets 內，FR-9.7）
      */
-    public record Dashboard(String baseCurrency, BigDecimal netWorth, BigDecimal assets, BigDecimal liabilities,
+    public record Dashboard(String baseCurrency, BigDecimal netWorth, BigDecimal assets, BigDecimal liabilities, BigDecimal investments,
                             String ratesDate, int hiddenAccounts, String month, Totals monthTotals, BudgetSummary budget,
                             List<Transaction> recent) {}
 
@@ -57,8 +60,10 @@ public class DashboardService {
         String ratesDate = null;
         int hidden = 0;
         Map<String, String> currencyOf = new HashMap<>();
+        java.util.Set<String> visible = new java.util.HashSet<>();
         for (Account a : accounts.list(user.id, true)) {
             currencyOf.put(a.id, a.currency);
+            if (a.visible) visible.add(a.id);
             if (a.balance.signum() == 0) continue;
             if (!a.visible) { // 總覽隱藏的帳戶不計入資產、負債、淨資產（收支與預算照算）
                 hidden++;
@@ -73,7 +78,8 @@ public class DashboardService {
             if (Account.LIABILITY_KINDS.contains(a.kind) || v.signum() < 0) liabilities = liabilities.add(v);
             else assets = assets.add(v);
         }
-        assets = Currencies.round(assets, base);
+        BigDecimal invest = Currencies.round(investments.marketValues(user, List.of(today), rates, visible).get(today), base);
+        assets = Currencies.round(assets, base).add(invest);
         liabilities = Currencies.round(liabilities, base);
 
         YearMonth m = YearMonth.now(Dates.ZONE);
@@ -90,7 +96,7 @@ public class DashboardService {
         BudgetView bv = budgets.view(user, m.toString());
         List<BudgetItem> top = bv.items().stream().sorted(Comparator.comparing(BudgetItem::percentage).reversed()).limit(TOP_BUDGETS).toList();
 
-        return new Dashboard(base, assets.add(liabilities), assets, liabilities, ratesDate, hidden, m.toString(), totals,
+        return new Dashboard(base, assets.add(liabilities), assets, liabilities, invest, ratesDate, hidden, m.toString(), totals,
                 new BudgetSummary(bv.warnPct(), bv.total(), top), ledger.recent(user.id, 5));
     }
 

@@ -5,6 +5,8 @@ import com.doaccounts.model.Budget;
 import com.doaccounts.model.ExchangeRate;
 import com.doaccounts.model.ImportBatch;
 import com.doaccounts.model.ImportTemplate;
+import com.doaccounts.model.Price;
+import com.doaccounts.model.Security;
 import com.doaccounts.model.User;
 import com.doaccounts.model.Category;
 import com.doaccounts.model.Transaction;
@@ -14,6 +16,8 @@ import com.doaccounts.repository.ExchangeRateRepository;
 import com.doaccounts.repository.ImportBatchRepository;
 import com.doaccounts.repository.ImportTemplateRepository;
 import com.doaccounts.repository.UserRepository;
+import com.doaccounts.repository.PriceRepository;
+import com.doaccounts.repository.SecurityRepository;
 import com.doaccounts.repository.CategoryRepository;
 import com.doaccounts.repository.TransactionRepository;
 import com.doaccounts.service.AccountService.AccountRequest;
@@ -53,6 +57,10 @@ class Fixture {
     final List<ImportBatch> importBatches = new ArrayList<>();
     final List<ImportTemplate> templates = new ArrayList<>();
     final List<User> users = new ArrayList<>();
+    final List<Security> securities = new ArrayList<>();
+    final List<Price> prices = new ArrayList<>();
+    /** 假的台股清單（QuoteService 的資料來源） */
+    final Map<String, List<Map<String, Object>>> quoteFeed = new HashMap<>();
 
     final AccountRepository accountRepo = mock(AccountRepository.class);
     final CategoryRepository categoryRepo = mock(CategoryRepository.class);
@@ -63,6 +71,8 @@ class Fixture {
     final ImportBatchRepository batchRepo = mock(ImportBatchRepository.class);
     final ImportTemplateRepository templateRepo = mock(ImportTemplateRepository.class);
     final UserRepository userRepo = mock(UserRepository.class);
+    final SecurityRepository securityRepo = mock(SecurityRepository.class);
+    final PriceRepository priceRepo = mock(PriceRepository.class);
 
     final AccountService accountService = new AccountService(accountRepo, ledger);
     final CategoryService categoryService = new CategoryService(categoryRepo, ledger);
@@ -70,12 +80,18 @@ class Fixture {
     final TransactionBatchService batchService = new TransactionBatchService(txRepo, ledger, txService);
     final FxService fxService = new FxService(fxRepo);
     final BudgetService budgetService = new BudgetService(budgetRepo, categoryService, accountService, ledger, fxService);
-    final ReportService reportService = new ReportService(accountService, categoryService, ledger, fxService, budgetService);
-    final DashboardService dashboardService = new DashboardService(accountService, ledger, fxService, budgetService);
+    final QuoteService quoteService = new QuoteService(securityRepo, priceRepo, url -> {
+        List<Map<String, Object>> rows = quoteFeed.get(url);
+        if (rows == null) throw new IllegalStateException("連不到 " + url);
+        return rows;
+    });
+    final InvestmentService investmentService = new InvestmentService(txRepo, ledger, accountService, categoryService, securityRepo, priceRepo, quoteService, fxService);
+    final ReportService reportService = new ReportService(accountService, categoryService, ledger, fxService, budgetService, investmentService);
+    final DashboardService dashboardService = new DashboardService(accountService, ledger, fxService, budgetService, investmentService);
 
     final ImportService importService = new ImportService(txRepo, ledger, txService, accountService, categoryService, batchRepo, templateRepo);
     final ExportService exportService = new ExportService(accountService, categoryService);
-    final BackupService backupService = new BackupService(userRepo, accountRepo, categoryRepo, txRepo, budgetRepo, fxRepo, templateRepo, ledger, categoryService);
+    final BackupService backupService = new BackupService(userRepo, accountRepo, categoryRepo, txRepo, budgetRepo, fxRepo, templateRepo, ledger, categoryService, securityRepo);
 
     /** 本位幣 TWD 的使用者 */
     final User me = user(ME);
@@ -102,6 +118,7 @@ class Fixture {
         when(txRepo.save(any(Transaction.class))).thenAnswer(inv -> {
             Transaction t = inv.getArgument(0);
             t.version = t.version == null ? 0L : t.version + 1;
+            if (t.createdAt == null) t.createdAt = java.time.Instant.now().plusNanos(++clock); // 模擬 @CreatedDate，同一天的交易依建立順序
             if (t.id != null) transactions.replaceAll(x -> x.id.equals(t.id) ? t : x); // 同 id 的新物件取代舊的（像資料庫一樣）
             return store(transactions, t, "t");
         });
@@ -114,7 +131,30 @@ class Fixture {
             mine(inv.getArgument(0)).forEach(t -> t.entries.forEach(e -> m.merge(e.accountId, e.amount, BigDecimal::add)));
             return m;
         });
-        when(ledger.hasTransactions(anyString(), anyString())).thenAnswer(inv -> !byAccount(inv.getArgument(0), inv.getArgument(1)).isEmpty());
+        when(ledger.hasTransactions(anyString(), anyString())).thenAnswer(inv -> !byAccount(inv.getArgument(0), inv.getArgument(1)).isEmpty()
+                || mine(inv.getArgument(0)).stream().anyMatch(t -> t.investment != null && inv.getArgument(1).equals(t.investment.accountId)));
+        when(ledger.investments(anyString())).thenAnswer(inv -> mine(inv.getArgument(0)).stream().filter(t -> Transaction.INVESTMENT.equals(t.kind))
+                .sorted((a, b) -> a.date.compareTo(b.date)).toList());
+        when(securityRepo.save(any(Security.class))).thenAnswer(inv -> store(securities, inv.getArgument(0), "s"));
+        when(securityRepo.findAll()).thenAnswer(inv -> List.copyOf(securities));
+        when(securityRepo.findById(anyString())).thenAnswer(inv -> securities.stream().filter(x -> x.id.equals(inv.getArgument(0))).findFirst());
+        when(securityRepo.findAllById(any())).thenAnswer(inv -> {
+            Iterable<?> ids = inv.getArgument(0);
+            List<Object> l = new ArrayList<>();
+            ids.forEach(l::add);
+            return securities.stream().filter(x -> l.contains(x.id)).toList();
+        });
+        when(securityRepo.findFirstByMarketAndSymbol(anyString(), anyString())).thenAnswer(inv -> securities.stream()
+                .filter(x -> x.market.equals(inv.getArgument(0)) && x.symbol.equals(inv.getArgument(1))).findFirst());
+        when(priceRepo.save(any(Price.class))).thenAnswer(inv -> store(prices, inv.getArgument(0), "p"));
+        when(priceRepo.findByUserIdIsNullAndSecurityIdInAndDateLessThanEqual(anyCollection(), anyString())).thenAnswer(inv -> prices.stream()
+                .filter(x -> x.userId == null && ((Collection<?>) inv.getArgument(0)).contains(x.securityId) && x.date.compareTo(inv.getArgument(1)) <= 0).toList());
+        when(priceRepo.findByUserIdAndSecurityIdInAndDateLessThanEqual(anyString(), anyCollection(), anyString())).thenAnswer(inv -> prices.stream()
+                .filter(x -> inv.getArgument(0).equals(x.userId) && ((Collection<?>) inv.getArgument(1)).contains(x.securityId) && x.date.compareTo(inv.getArgument(2)) <= 0).toList());
+        when(priceRepo.findFirstByUserIdIsNullAndSecurityIdAndDate(anyString(), anyString())).thenAnswer(inv -> prices.stream()
+                .filter(x -> x.userId == null && x.securityId.equals(inv.getArgument(0)) && x.date.equals(inv.getArgument(1))).findFirst());
+        when(priceRepo.findFirstByUserIdAndSecurityIdAndDate(anyString(), anyString(), anyString())).thenAnswer(inv -> prices.stream()
+                .filter(x -> inv.getArgument(0).equals(x.userId) && x.securityId.equals(inv.getArgument(1)) && x.date.equals(inv.getArgument(2))).findFirst());
         when(ledger.earliestDate(anyString(), anyString())).thenAnswer(inv -> byAccount(inv.getArgument(0), inv.getArgument(1)).stream().map(t -> t.date).findFirst());
         when(ledger.byAccount(anyString(), anyString())).thenAnswer(inv -> byAccount(inv.getArgument(0), inv.getArgument(1)));
         when(ledger.findByIds(anyString(), anyCollection())).thenAnswer(inv -> mine(inv.getArgument(0)).stream().filter(t -> ((Collection<?>) inv.getArgument(1)).contains(t.id)).toList());
@@ -210,6 +250,8 @@ class Fixture {
         when(ledger.titleStartsWith(anyString(), anyString(), anyInt())).thenAnswer(inv -> newestFirst(mine(inv.getArgument(0))).stream()
                 .filter(t -> t.title.startsWith(inv.getArgument(1))).toList());
     }
+
+    private long clock;
 
     /** 設成 true 讓 txRepo.saveAll 失敗（測試補償） */
     boolean failSaveAll;

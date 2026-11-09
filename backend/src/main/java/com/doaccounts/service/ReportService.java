@@ -37,8 +37,11 @@ public class ReportService {
     private final LedgerQueries ledger;
     private final FxService fx;
     private final BudgetService budgets;
+    private final InvestmentService investments;
 
-    public ReportService(AccountService accounts, CategoryService categories, LedgerQueries ledger, FxService fx, BudgetService budgets) {
+    public ReportService(AccountService accounts, CategoryService categories, LedgerQueries ledger, FxService fx, BudgetService budgets,
+                         InvestmentService investments) {
+        this.investments = investments;
         this.accounts = accounts;
         this.categories = categories;
         this.ledger = ledger;
@@ -73,6 +76,11 @@ public class ReportService {
             monthly.computeIfAbsent(am.accountId(), k -> new TreeMap<>()).merge(am.month(), am.sum(), BigDecimal::add);
         }
         RateTable rates = fx.latest(user);
+        // 各月底的投資市值（月底收盤價 × 月底匯率；本月以今天為準，SD 4.5）
+        List<String> ends = new ArrayList<>();
+        for (YearMonth m = first; !m.isAfter(now); m = m.plusMonths(1)) ends.add(m.equals(now) ? today.toString() : m.atEndOfMonth().toString());
+        java.util.Set<String> visible = all.stream().filter(a -> a.visible).map(a -> a.id).collect(java.util.stream.Collectors.toSet());
+        Map<String, BigDecimal> invest = investments.marketValues(user, ends, rates, visible);
 
         List<NetWorthPoint> points = new ArrayList<>();
         for (YearMonth m = first; !m.isAfter(now); m = m.plusMonths(1)) {
@@ -91,10 +99,10 @@ public class ReportService {
                 if (Account.LIABILITY_KINDS.contains(a.kind) || v.signum() < 0) liabilities = liabilities.add(v);
                 else assets = assets.add(v);
             }
-            assets = Currencies.round(assets, base);
+            BigDecimal iv = Currencies.round(invest.getOrDefault(end, BigDecimal.ZERO), base);
+            assets = Currencies.round(assets, base).add(iv); // 資產含投資市值
             liabilities = Currencies.round(liabilities, base);
-            // 投資市值於階段 4 加入
-            points.add(new NetWorthPoint(m.toString(), assets, liabilities, BigDecimal.ZERO, assets.add(liabilities)));
+            points.add(new NetWorthPoint(m.toString(), assets, liabilities, iv, assets.add(liabilities)));
         }
         return new NetWorth(base, points);
     }

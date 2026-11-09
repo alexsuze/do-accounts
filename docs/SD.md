@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | 0.5 |
+| 文件版本 | 0.6 |
 | 系統版本 | 2.0.0（規劃中） |
 | 撰寫日期 | 2026-11-09 |
 | 文件性質 | 系統設計（SD） |
@@ -13,6 +13,8 @@
 
 > v0.2 變更：後端改為 Java（Spring Boot），整體技術架構比照 to-do-schedule。
 > 資料庫因此改回 MongoDB Atlas，登入改為 Google 登入＋管理員核准。
+> v0.6 變更：階段 4 實作——投資交易分錄角色（2.6）、手動報價只影響自己（2.6）、投資 API 格式（3.9）、計算與報價細節（4.5）、備份格式第 2 版含證券。
+>
 > v0.5 變更：階段 3 實作——CSV 改在瀏覽器解析、取消 import_previews（2.9、4.7、ADR-17）、匯入匯出與備份 API 格式（3.10）。
 >
 > v0.4 變更：階段 2 實作——預算停止標記（2.7）、匯率以 TWD 為中介與來源改為 currency-api 鏡像（2.8、4.4）、預算／報表／匯率 API 回傳格式（3.6～3.8）、圖表改用自製 SVG（ADR-15、16）。
@@ -271,13 +273,13 @@ db.transactions.aggregate([
 | account_id | string | 持有證券的投資帳戶（kind = `investment`） |
 | security_id | string | |
 | trade_type | string | `buy` / `sell` / `cash_dividend` / `stock_dividend` / `split` / `fee` |
-| quantity | Decimal128 | 股數（買、賣、股票股利）；`split` 存分割比例 |
-| price | Decimal128 | 證券幣別的成交價 |
-| fee / tax | Decimal128 | |
+| quantity | Decimal128 | 股數（買、賣、股票股利）；`cash_dividend` 為參與配息的股數；`split` 存分割比例（1 股變幾股） |
+| price | Decimal128 | 證券幣別的成交價；`cash_dividend` 為每股配息 |
+| fee / tax | Decimal128 | 證券幣別 |
 
-交割帳戶（`entries[0].account_id`）可以是投資帳戶本身（券商交割戶），也可以是另一個銀行帳戶。
+交割帳戶（`entries[0].account_id`）可以是投資帳戶本身（券商交割戶），也可以是另一個銀行帳戶。交割帳戶幣別與證券不同時（例如台幣帳戶買美股），由使用者填實際扣款／入帳金額；相同時依幣別小數位四捨五入。
 
-`stock_dividend`、`split` 沒有現金流動，`entries` 為空陣列。`cash_dividend` 的 `settlement` 分錄在統計中當成「投資損益」收入；`fee` 當成「投資損益」支出。
+分錄角色：`buy`／`sell` 用 `settlement`（資產轉換，不計入收支）；`cash_dividend` 用 `main` ＋ 收入分類「投資損益」（`system_key = investment_pnl`）、`fee` 用 `main` ＋ 支出分類「手續費」，因此直接沿用既有的收支統計、預算與報表。`stock_dividend`、`split` 沒有現金流動，`entries` 為空陣列。投資交易的 `title` 由系統產生（「買進 0050 元大台灣50」）。
 
 **securities**（全站共用，不分使用者）
 
@@ -299,7 +301,9 @@ db.transactions.aggregate([
 | date | string | `YYYY-MM-DD` |
 | close | Decimal128 | |
 | source | string | `twse` / `tpex` / `manual` |
-| user_id | string / null | 手動輸入時記錄是誰輸入的 |
+| user_id | string / null | 排程抓取的為 null（全站共用）；手動輸入的記錄使用者，**只影響自己**（同一天手動價優先，與手動匯率相同） |
+
+唯一索引改為 `{ security_id, date, user_id }`。
 
 ### 2.7 budgets
 
@@ -491,17 +495,16 @@ public record TransactionRequest(
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/api/investments/securities?q=&market=` | 先查 `securities`；台股查不到時查 TWSE／TPEx 清單 |
-| POST | `/api/investments/securities` | 手動建立 |
-| GET | `/api/investments/holdings?account_id=` | 持倉：股數、均價、成本、現價（含報價日期）、市值、未實現損益、報酬率 |
-| GET | `/api/investments/summary` | 總市值、總損益、累積股利、配置比例 |
-| GET | `/api/investments/trades?account_id&security_id&from&to` | 投資交易列表（分頁） |
-| POST | `/api/investments/trades` | 新增（寫入一份 `kind = investment` 的 transactions 文件） |
-| PUT | `/api/investments/trades/{id}` | |
-| DELETE | `/api/investments/trades/{id}` | |
-| GET | `/api/investments/realized?year=` | 已實現損益明細 |
-| PUT | `/api/investments/prices` | `{ security_id, date, close }` 手動報價 |
-| GET | `/api/investments/trades/export` | CSV |
+| GET | `/api/investments/securities?q=&market=` | 代號開頭或名稱包含；台股代號查不到時查 TWSE／TPEx 清單並自動建立（00 開頭為 ETF） |
+| GET | `/api/investments/securities/{id}` | |
+| POST | `/api/investments/securities` | 手動建立 `{ market, symbol, name, currency, asset_type }`；同市場同代號回傳既有的 |
+| GET | `/api/investments/holdings?account_id=` | `[{ account_id, security, quantity, avg_cost, cost, price, price_date, price_source, manual_price, market_value, unrealized, realized, dividends, return_pct, market_value_base, unrealized_base }]`；沒有報價時 price 為 null、市值以成本計 |
+| GET | `/api/investments/summary?account_id=` | 本位幣：`market_value, cost, unrealized, unrealized_pct, realized_this_year, sells_this_year, realized_total, dividends_total, dividends_this_year, dividend_count_this_year, return_pct, oldest_price_date, allocation: { market, asset_type, currency: [{ key, value, percentage }] }` |
+| GET | `/api/investments/trades?account_id&security_id&from&to&page&size` | `{ items: [{ transaction, security, realized }], total }`，新到舊；賣出帶已實現損益 |
+| GET / POST / PUT / DELETE | `/api/investments/trades[/{id}]` | body `{ trade_type, account_id, security_id, date, quantity, price, fee, tax, settlement_account_id, settlement_amount, note, version }`；寫入前重算該使用者全部投資交易，超賣回 422；PUT 需帶 version |
+| PUT | `/api/investments/prices` | `{ security_id, date, close }` 手動報價（只影響自己） |
+| POST | `/api/investments/prices/refresh` | 立即更新台股報價（同一台伺服器 5 分鐘內只能一次，否則 429） |
+| GET | `/api/export/trades?account_id=` | 投資交易 CSV |
 
 ### 3.10 匯入匯出 `/api/import`、`/api/export`
 
@@ -514,7 +517,7 @@ public record TransactionRequest(
 | GET / POST / PUT / DELETE | `/api/import/templates[/{id}]` | 匯入範本 `{ name, mapping }` |
 | POST | `/api/import/trades/preview`、`/commit` | 投資交易匯入（階段 4） |
 | GET | `/api/export/transactions?from&to&kind&account_id&category_id&tag&q` | 交易 CSV（篩選條件同明細列表），舊到新 |
-| GET | `/api/export/backup` | 完整 JSON 備份下載：`{ format: "do-accounts-backup", version: 1, exported_at, base_currency, settings, accounts, categories, transactions, budgets, manual_rates, import_templates }` |
+| GET | `/api/export/backup` | 完整 JSON 備份下載：`{ format: "do-accounts-backup", version: 2, exported_at, base_currency, settings, accounts, categories, transactions, budgets, manual_rates, import_templates, securities }`（第 2 版加入投資用到的證券；還原時依市場＋代號對應既有證券，第 1 版的檔案也能還原） |
 | POST | `/api/import/backup` | 從 JSON 還原（只限還沒有任何交易的帳號；先檢查參照完整，全部換成新 id 寫入；回傳各類筆數） |
 
 ---
@@ -705,15 +708,17 @@ for trade in 該帳戶該證券的投資交易（依 date、created_at 排序）
 ```
 
 - 新增、修改、刪除投資交易時，重新計算該證券的整段歷史；若任何時間點持股變成負數就回 422（修改過去的交易也會檢查）。
-- 交割金額由前端依台股規則帶入預設值（手續費 `max(20, 成交金額 × 0.1425% × 折扣)`、賣出證交稅股票 0.3%／ETF 0.1%），使用者可以修改。
+- 交割金額由前端依台股規則帶入預設值（手續費 `max(20, 成交金額 × 0.1425% × 折扣)`、賣出證交稅股票 0.3%／ETF 0.1%，都無條件捨去），使用者可以修改（`utils/invest.js`）。
+- 現金股利：`dividends += 股數 × 每股配息 − 費用`；`fee` 交易的金額加入成本與累計投入。
+- 報酬率的分母「累計投入」= 所有買進金額＋費用；`HoldingCalculator` 為純函式，同一天的交易依建立時間排序。
 - 首頁淨資產與資產趨勢中，投資市值 = 持股 × 當日（或之前最近一天）收盤價 × 當日匯率。
 
 **報價來源**（`QuoteProvider` 介面，可以替換）
 
 | 市場 | 第一版 | 排程 |
 |---|---|---|
-| TW 上市 | TWSE OpenAPI 每日收盤（免金鑰） | 週一到週五 14:30（Asia/Taipei），只抓有持倉的證券 |
-| TWO 上櫃 | TPEx OpenAPI（免金鑰） | 同上 |
+| TW 上市 | TWSE OpenAPI `exchangeReport/STOCK_DAY_ALL`（免金鑰） | 週一到週五 14:30、18:30（Asia/Taipei），更新資料庫裡全部台股證券；資料的民國年日期為報價日 |
+| TWO 上櫃 | TPEx OpenAPI `tpex_mainboard_quotes`（免金鑰） | 同上 |
 | US／基金／其他 | 手動輸入 | — |
 
 ### 4.6 報表演算法（`ReportService`，MongoTemplate aggregation）

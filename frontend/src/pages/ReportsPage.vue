@@ -25,10 +25,11 @@
             <span class="lbl">{{ nw.points.length }} 個月變化</span>
             <span class="num text-2xl font-semibold" :class="change >= 0 ? 'text-inc' : 'text-exp'">{{ formatAmount(change, cur, { sign: 'always' }) }}<span v-if="changePct != null">（{{ changePct }}）</span></span>
           </div>
+          <div v-if="Number(last.investments)" class="flex flex-col gap-0.5"><span class="lbl">其中投資市值</span><span class="num text-2xl font-semibold">{{ fmt(last.investments) }}</span></div>
           <div class="flex flex-col gap-0.5"><span class="lbl">總負債</span><span class="num text-2xl font-semibold" :class="Number(last.liabilities) < 0 && 'text-exp'">{{ fmt(last.liabilities) }}</span></div>
         </div>
         <NetWorthChart :points="nw.points" :currency="cur" />
-        <span class="text-xs text-muted">每月月底的餘額，外幣依當時匯率換算；本月以今天為準。投資市值會在階段 4 加入。</span>
+        <span class="text-xs text-muted">每月月底的餘額與投資市值（月底收盤價），外幣依當時匯率換算；本月以今天為準。</span>
       </template>
       <EmptyState v-else-if="nw" title="還沒有帳戶" text="建立帳戶後，這裡會顯示每月月底的資產與負債。" />
     </AppCard>

@@ -8,7 +8,7 @@
     <template v-if="d">
       <section class="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
         <StatCard glow label="淨資產 · Net worth" :value="fmt(d.net_worth, { symbol: true })" :hint="rateHint" />
-        <StatCard label="總資產 · Assets" :value="fmt(d.assets)" :hint="`${d.base_currency}，含外幣、不含總覽隱藏的帳戶`" />
+        <StatCard label="總資產 · Assets" :value="fmt(d.assets)" :hint="Number(d.investments) ? `含投資市值 ${fmt(d.investments)}` : `${d.base_currency}，含外幣、不含總覽隱藏的帳戶`" />
         <StatCard label="總負債 · Liabilities" :value="fmt(d.liabilities)" :tone="Number(d.liabilities) < 0 ? 'exp' : ''" hint="信用卡、貸款與負餘額帳戶" />
       </section>
 

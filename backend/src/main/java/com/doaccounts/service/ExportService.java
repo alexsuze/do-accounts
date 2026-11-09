@@ -55,7 +55,7 @@ public class ExportService {
                     default -> { }
                 }
             }
-            if (main == null) continue; // 投資交易等其他格式於之後的階段處理
+            if (main == null || Transaction.INVESTMENT.equals(t.kind)) continue; // 投資交易另有匯出（/api/export/trades）
             Account from = acc.get(main.accountId);
             Account to = in == null ? null : acc.get(in.accountId);
             Category c = t.categoryId == null ? null : cat.get(t.categoryId);
@@ -77,6 +77,38 @@ public class ExportService {
                     safe(t.note == null ? "" : t.note)));
         }
         w.flush();
+    }
+
+    public static final List<String> TRADE_HEADER = List.of("日期", "類型", "投資帳戶", "市場", "代號", "名稱", "股數", "價格",
+            "手續費", "稅", "交割帳戶", "交割金額", "幣別", "備註");
+    private static final Map<String, String> TRADE = Map.of("buy", "買進", "sell", "賣出", "cash_dividend", "現金股利",
+            "stock_dividend", "股票股利", "split", "分割", "fee", "費用");
+
+    /** 投資交易 CSV（SA FR-10.9）：股數、價格為證券幣別；交割金額為交割帳戶幣別（流入為正） */
+    public void writeTradesCsv(String userId, List<Transaction> txs, Map<String, com.doaccounts.model.Security> secs, OutputStream out) throws IOException {
+        Map<String, Account> acc = new HashMap<>();
+        for (Account a : accounts.list(userId, true)) acc.put(a.id, a);
+        Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+        w.write('\uFEFF');
+        line(w, TRADE_HEADER);
+        for (Transaction t : txs) {
+            if (t.investment == null) continue;
+            var iv = t.investment;
+            var sec = secs.get(iv.securityId);
+            Account holder = acc.get(iv.accountId);
+            Entry cash = t.entries.isEmpty() ? null : t.entries.getFirst();
+            Account settle = cash == null ? null : acc.get(cash.accountId);
+            line(w, List.of(t.date, TRADE.getOrDefault(iv.tradeType, iv.tradeType), safe(holder == null ? "" : holder.name),
+                    sec == null ? "" : sec.market, safe(sec == null ? "" : sec.symbol), safe(sec == null ? "" : sec.name),
+                    plain(iv.quantity), plain(iv.price), plain(iv.fee), plain(iv.tax),
+                    safe(settle == null ? "" : settle.name), cash == null ? "" : cash.amount.toPlainString(),
+                    settle == null ? "" : settle.currency, safe(t.note == null ? "" : t.note)));
+        }
+        w.flush();
+    }
+
+    private static String plain(BigDecimal v) {
+        return v == null ? "" : v.stripTrailingZeros().toPlainString();
     }
 
     private static void line(Writer w, List<String> cells) throws IOException {

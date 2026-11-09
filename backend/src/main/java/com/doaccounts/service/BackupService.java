@@ -5,6 +5,7 @@ import com.doaccounts.model.Budget;
 import com.doaccounts.model.Category;
 import com.doaccounts.model.ExchangeRate;
 import com.doaccounts.model.ImportTemplate;
+import com.doaccounts.model.Security;
 import com.doaccounts.model.Transaction;
 import com.doaccounts.model.Transaction.Entry;
 import com.doaccounts.model.User;
@@ -13,6 +14,7 @@ import com.doaccounts.repository.BudgetRepository;
 import com.doaccounts.repository.CategoryRepository;
 import com.doaccounts.repository.ExchangeRateRepository;
 import com.doaccounts.repository.ImportTemplateRepository;
+import com.doaccounts.repository.SecurityRepository;
 import com.doaccounts.repository.TransactionRepository;
 import com.doaccounts.repository.UserRepository;
 import org.bson.types.ObjectId;
@@ -39,7 +41,8 @@ public class BackupService {
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
 
     public static final String FORMAT = "do-accounts-backup";
-    public static final int VERSION = 1;
+    /** 2：加入投資（證券與投資交易） */
+    public static final int VERSION = 2;
     static final int CHUNK = 500;
 
     private final UserRepository users;
@@ -51,10 +54,12 @@ public class BackupService {
     private final ImportTemplateRepository templateRepo;
     private final LedgerQueries ledger;
     private final CategoryService categories;
+    private final SecurityRepository securityRepo;
 
     public BackupService(UserRepository users, AccountRepository accountRepo, CategoryRepository categoryRepo, TransactionRepository txRepo,
                          BudgetRepository budgetRepo, ExchangeRateRepository fxRepo, ImportTemplateRepository templateRepo,
-                         LedgerQueries ledger, CategoryService categories) {
+                         LedgerQueries ledger, CategoryService categories, SecurityRepository securityRepo) {
+        this.securityRepo = securityRepo;
         this.users = users;
         this.accountRepo = accountRepo;
         this.categoryRepo = categoryRepo;
@@ -66,19 +71,25 @@ public class BackupService {
         this.categories = categories;
     }
 
-    /** 投資（證券、持倉）於階段 4 加入，屆時 VERSION 加 1 並向下相容 */
+    /** securities：投資交易用到的證券（證券全站共用，還原時依市場＋代號對應；版本 1 的備份沒有這個欄位） */
     public record Backup(String format, int version, Instant exportedAt, String baseCurrency, User.Settings settings,
                          List<Account> accounts, List<Category> categories, List<Transaction> transactions,
-                         List<Budget> budgets, List<ExchangeRate> manualRates, List<ImportTemplate> importTemplates) {}
+                         List<Budget> budgets, List<ExchangeRate> manualRates, List<ImportTemplate> importTemplates,
+                         List<Security> securities) {}
 
     public record RestoreResult(int accounts, int categories, int transactions, int budgets, int manualRates, int importTemplates) {}
 
     public Backup export(User user) {
         List<Account> accs = accountRepo.findByUserId(user.id);
         accs.forEach(a -> { a.balance = null; a.hasTransactions = null; });
+        List<Transaction> txs = ledger.all(user.id);
+        java.util.Set<String> secIds = new java.util.HashSet<>();
+        txs.stream().filter(t -> t.investment != null).forEach(t -> secIds.add(t.investment.securityId));
+        List<Security> secs = new ArrayList<>();
+        securityRepo.findAllById(secIds).forEach(secs::add);
         return new Backup(FORMAT, VERSION, Instant.now(), FxService.baseOf(user), user.settingsOrDefault(),
-                accs, categoryRepo.findByUserId(user.id), ledger.all(user.id), budgetRepo.findByUserId(user.id),
-                fxRepo.findByUserIdOrderByDateDesc(user.id), templateRepo.findByUserIdOrderByNameAsc(user.id));
+                accs, categoryRepo.findByUserId(user.id), txs, budgetRepo.findByUserId(user.id),
+                fxRepo.findByUserIdOrderByDateDesc(user.id), templateRepo.findByUserIdOrderByNameAsc(user.id), secs);
     }
 
     public RestoreResult restore(User user, Backup b) {
@@ -93,6 +104,7 @@ public class BackupService {
         List<Budget> buds = nz(b.budgets());
         List<ExchangeRate> rates = nz(b.manualRates());
         List<ImportTemplate> tpls = nz(b.importTemplates());
+        List<Security> secs = nz(b.securities());
 
         // 舊 id → 新 id；同時檢查參照都存在，有問題就整個不還原
         Map<String, String> accId = new HashMap<>();
@@ -108,6 +120,13 @@ public class BackupService {
                 if (e.categoryId != null) map(catId, e.categoryId, "交易「" + t.title + "」的手續費分類不存在");
             }
         }
+        java.util.Set<String> secIds = new java.util.HashSet<>();
+        for (Security x : secs) secIds.add(require(x.id, "證券缺少 id"));
+        for (Transaction t : txs) {
+            if (t.investment == null) continue;
+            map(accId, t.investment.accountId, "投資交易「" + t.title + "」的投資帳戶不存在");
+            if (!secIds.contains(t.investment.securityId)) throw bad("投資交易「" + t.title + "」的證券不存在");
+        }
         for (Budget x : buds) if (x.categoryId != null) map(catId, x.categoryId, "預算的分類不存在");
 
         // 清掉目前的設定（帳號沒有交易，所以帳戶都沒有餘額變動）
@@ -118,6 +137,16 @@ public class BackupService {
         templateRepo.deleteAll(templateRepo.findByUserIdOrderByNameAsc(user.id));
 
         try {
+            // 證券全站共用：同市場同代號的直接沿用，沒有才新增
+            Map<String, String> secId = new HashMap<>();
+            for (Security x : secs) {
+                String old = x.id;
+                Security found = securityRepo.findFirstByMarketAndSymbol(x.market, x.symbol).orElseGet(() -> {
+                    x.id = null;
+                    return securityRepo.save(x);
+                });
+                secId.put(old, found.id);
+            }
             for (Account a : accs) {
                 a.id = accId.get(a.id);
                 a.userId = user.id;
@@ -140,6 +169,10 @@ public class BackupService {
                 for (Entry e : t.entries) {
                     e.accountId = accId.get(e.accountId);
                     if (e.categoryId != null) e.categoryId = catId.get(e.categoryId);
+                }
+                if (t.investment != null) {
+                    t.investment.accountId = accId.get(t.investment.accountId);
+                    t.investment.securityId = secId.get(t.investment.securityId);
                 }
             }
             for (int i = 0; i < txs.size(); i += CHUNK) txRepo.saveAll(txs.subList(i, Math.min(i + CHUNK, txs.size())));

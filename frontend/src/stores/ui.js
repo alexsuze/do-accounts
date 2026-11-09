@@ -12,6 +12,7 @@ export const useUiStore = defineStore('ui', {
     systemDark: !!media?.matches,
     /** 交易有異動時 +1，頁面 watch 它來重新載入（記帳視窗在任何頁面都能開） */
     ledgerVersion: 0,
+    tradeDialog: null,
     /** 記帳視窗：null 為關閉；{ transaction?, preset? } 為開啟 */
     txDialog: null,
     /** 全域計算機（SA FR-11.1）：target 為帶入結果的 callback */
@@ -43,7 +44,15 @@ export const useUiStore = defineStore('ui', {
     },
     /** 開啟記帳視窗。transaction：要編輯的交易；preset：新增時的預設值（例如帳戶、複製的內容） */
     openTx ({ transaction = null, preset = null } = {}) {
+      if (transaction?.kind === 'investment') return this.openTrade({ id: transaction.id })
       this.txDialog = { transaction, preset, key: Date.now() }
+    },
+    /** 開啟投資交易視窗。id：要編輯的交易；preset：新增時的預設值（帳戶、證券、類型） */
+    openTrade ({ id = null, preset = null } = {}) {
+      this.tradeDialog = { id, preset, key: Date.now() }
+    },
+    closeTrade () {
+      this.tradeDialog = null
     },
     closeTx () {
       this.txDialog = null
