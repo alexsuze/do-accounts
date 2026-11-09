@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | 0.2（草案，待確認） |
+| 文件版本 | 0.3（草案，待確認） |
 | 系統版本 | 2.0.0（規劃中） |
 | 撰寫日期 | 2026-11-09 |
 | 文件性質 | 系統設計（SD） |
@@ -13,7 +13,7 @@
 
 > v0.2 變更：後端改為 Java（Spring Boot），整體技術架構比照 to-do-schedule。
 > 資料庫因此改回 MongoDB Atlas，登入改為 Google 登入＋管理員核准。
-> **UI 元件庫（Quasar 或其他）暫不決定**，等 UI 設計確認後再選，見 1.5。
+> v0.3 變更：頁面示意圖定案，UI 採 **Tailwind CSS v4 ＋ Reka UI**（不使用 Quasar），見 1.5 與第 5 章。
 > 帳務核心設計（交易＋分錄、精確金額、每日匯率）維持不變，改以 MongoDB 的方式實作，見第 2 章。
 
 ---
@@ -58,7 +58,10 @@ graph TB
 |---|---|---|---|
 | 前端建置 | Vite | 相同 | |
 | 前端框架 | Vue 3（`<script setup>`，JavaScript） | 相同 | |
-| UI 元件 | **待定**（見 1.5） | 待定 | to-do-schedule 使用 Quasar；本專案等 UI 設計確認後再決定 |
+| 樣式 | Tailwind CSS v4（`@tailwindcss/vite`） | **不同**（to-do-schedule 用 Quasar） | 依示意圖自訂科技風格，設計 tokens 見 5.3 |
+| 互動元件 | Reka UI（無樣式） | **新增** | 對話框、下拉選單、日期選擇、Toast 的鍵盤操作與無障礙 |
+| 圖示 | lucide-vue-next | **新增** | 線條圖示 |
+| 字體 | @fontsource（Space Grotesk、Inter、JetBrains Mono、Noto Sans TC） | **新增** | 自帶字體檔，不從外部載入 |
 | 狀態管理 | Pinia | 相同 | 每個資源一個 store，負責呼叫 API 與快取清單 |
 | 路由 | Vue Router，`createWebHashHistory` | 相同 | GitHub Pages 子路徑重新整理不會 404 |
 | HTTP | axios（`services/api.js` 統一 instance） | 相同 | 自動帶通行證、401 自動回登入頁、統一顯示錯誤 |
@@ -86,16 +89,17 @@ do-accounts/
 ├── docs/                         # SA、SD、開發進度
 ├── frontend/
 │   ├── src/
-│   │   ├── main.js               # Pinia、Router、UI 元件庫初始化
+│   │   ├── main.js               # Pinia、Router、主題初始化、載入 css/main.css
 │   │   ├── App.vue
 │   │   ├── router/index.js       # hash 路由、登入守衛、管理頁守衛
 │   │   ├── layouts/MainLayout.vue # 側邊欄（桌面）/ 收合選單（手機）、時鐘、主題切換
 │   │   ├── pages/                # 每個頁面一個檔案（見 5.1）
-│   │   ├── components/           # TransactionDialog、TradeDialog、MoneyInput、CalculatorPanel…
+│   │   ├── components/           # 功能元件：TransactionDialog、TradeDialog、TransactionGrid…（5.5）
+│   │   │   └── ui/               # 基礎元件：AppButton、AppDialog、MoneyInput、SegmentedControl…（5.5）
 │   │   ├── stores/               # auth、accounts、categories、transactions、budgets、reports、investments、fx
 │   │   ├── services/             # api.js、session.js
 │   │   ├── utils/                # money.js、date.js、expr.js（算式計算）＋ *.test.js
-│   │   └── css/                  # app.css（全站樣式、深淺色 CSS 變數）
+│   │   └── css/main.css          # Tailwind 進入點、設計 tokens、深淺色變數（5.4）
 │   ├── vite.config.js            # base 由 VITE_BASE_PATH 決定
 │   ├── .env.example
 │   └── package.json
@@ -129,18 +133,15 @@ do-accounts/
 - 時間戳記以 UTC `Instant` 保存；**交易日期**以 `"YYYY-MM-DD"` 字串保存（理由見 2.1）。
 - 不使用軟刪除：記帳資料刪除就是真的刪除（匯入可整批撤銷，資料可匯出備份）。
 
-### 1.5 待定：UI 元件庫
+### 1.5 UI 方案（已定案）
 
-UI 元件庫等 UI 設計（頁面示意圖）確認後再決定，不影響後端與資料庫設計。前端的 `router`、`stores`、`services/api.js`、`utils` 都不依賴元件庫，可以先開發。
+示意圖確認後，UI 採 **Tailwind CSS v4 ＋ Reka UI**，不使用 Quasar（理由見 ADR-12）：
 
-| 選項 | 適合的情況 | 注意事項 |
-|---|---|---|
-| Quasar 2 | 想和 to-do-schedule 一致；需要完整的表格、日期選擇器、通知、深色模式 | 外觀偏 Material Design，大幅客製化較費工 |
-| Tailwind CSS（＋ Headless UI／Reka UI） | UI 設計有明確的自訂風格 | 表格、日期選擇器要自己組或另找套件 |
-| Element Plus／Naive UI | 偏後台管理風格、表格與表單多 | 手機版體驗較弱 |
-| Bootstrap 5 | 熟悉度高、快速完成 | 外觀較制式 |
+- 示意圖是自訂的科技風格（深色、青色主色、等寬數字、光暈），用 Tailwind 直接實作最貼近，不必覆寫元件庫的預設外觀。
+- Tailwind 只負責樣式；對話框、下拉選單、日期選擇這類有複雜鍵盤操作的元件交給 Reka UI（無樣式），兼顧無障礙。
+- 表格模式（多筆編輯）本來就要自建格子編輯，不依賴元件庫的表格。
 
-決定後要更新的地方：1.2 技術棧、1.3 `main.js` 與 `css/`、5.3 元件、5.4 響應式與主題。
+設計 tokens、Tailwind 設定、元件清單見第 5 章。
 
 ---
 
@@ -619,7 +620,7 @@ batch(userId, req):
 - 貼上（`utils/paste.js`，純函式＋ `node --test`）：解析剪貼簿的 Tab 分隔文字（Excel、Google 試算表複製出來就是這個格式），依目前欄位順序對應；日期格式轉換；帳戶、分類用名稱完全相同 → 去除空白後相同 → 包含，依序比對，找不到就留空並標紅。
 - 草稿：每次變更後 1 秒寫入 localStorage `do-accounts:batch-draft`（含載入時的篩選條件與 version），開啟表格模式時若有草稿就詢問是否還原；儲存成功後清除。
 - 離開提醒：路由 `beforeRouteLeave` ＋ `window.onbeforeunload`。
-- 表格元件：等 UI 元件庫決定後（1.5）再選定格子編輯的實作方式；需要支援鍵盤移動、格子內下拉選單、貼上。若元件庫的表格不支援格子編輯，就自己做（`<table>` ＋ 每格一個輸入框）。
+- 表格元件：自建（`<table>` ＋ 每格一個輸入框，Tailwind 樣式）；鍵盤移動、格子內下拉選單（Reka UI Combobox）、貼上都自己處理，版面見示意圖「表格模式」。
 
 ### 4.3 金額處理
 
@@ -743,22 +744,28 @@ sequenceDiagram
 
 ## 5. 前端設計
 
+> 頁面示意圖（18 張，可切換深淺色、可點擊操作）：https://claude.ai/artifact/H4g7zeUWK4nhE9SA4ET5vM
+> 本章的版面、顏色、元件以示意圖為準；實作時如需調整，先改示意圖或本章再改程式。
+
 ### 5.1 路由（hash 模式，比照 to-do-schedule `router/index.js`）
 
-| 路徑 | 頁面 | 說明 |
-|---|---|---|
-| `#/login` | LoginPage | Google 登入；pending 時顯示「等待核准」 |
-| `#/` | DashboardPage | 淨資產三卡、帳戶分組（拖曳排序）、本月收支與預算、最近交易、快速記帳 |
-| `#/transactions` | TransactionsPage | 篩選列（同步到 URL query）、依日期分組、每日小計、分頁、批次操作、「表格編輯」按鈕 |
-| `#/transactions/grid` | TransactionGridPage | 表格模式（4.2.1）；`?from&to…` 帶篩選條件載入既有交易，沒有參數時為空白表格；手機版改為卡片清單 |
-| `#/accounts`、`#/accounts/:id` | AccountsPage、AccountDetailPage | 帳戶管理；單一帳戶的餘額走勢與明細 |
-| `#/categories` | CategoriesPage | 收入／支出頁籤，兩層分類，拖曳排序 |
-| `#/budgets` | BudgetsPage | 月份切換、總預算與分類進度條、複製上月 |
-| `#/reports` | ReportsPage | 淨資產、收支結構、每日、分類趨勢四個頁籤 |
-| `#/investments`、`#/investments/:accountId` | InvestmentsPage、HoldingsPage | 總覽與配置圖、帳戶持倉、交易紀錄 |
-| `#/import` | ImportPage | 步驟精靈（上傳 → 對應 → 預覽 → 完成）＋ 匯入紀錄 |
-| `#/settings` | SettingsPage | 本位幣、偏好、外觀、匯率手動覆寫、匯出備份 |
-| `#/admin` | AdminPage | 使用者核准／停用、手動執行排程（`meta.admin`） |
+| 路徑 | 頁面 | 示意圖 | 說明 |
+|---|---|---|---|
+| `#/login` | LoginPage | 登入 | Google 登入；待核准時顯示「已送出申請」 |
+| `#/` | DashboardPage | 總覽（桌面／手機） | 淨資產三卡、淨資產趨勢、本月收支與預算、帳戶分組（拖曳排序）、最近交易 |
+| `#/transactions` | TransactionsPage | 明細（桌面／手機） | 篩選列（同步到 URL query）、四格摘要、依日期分組與每日小計、勾選後的批次操作列、分頁 |
+| `#/transactions/grid` | TransactionGridPage | 表格模式、多筆編輯（手機卡片） | 4.2.1；`?from&to…` 帶篩選條件載入既有交易，沒有參數時為空白表格；手機改為卡片清單 |
+| `#/accounts` | AccountsPage | 帳戶管理 | 依類型分組、拖曳排序、顯示開關；右側編輯面板 |
+| `#/accounts/:id` | AccountDetailPage | 帳戶詳細 | 目前餘額組成、每日餘額走勢、此帳戶交易（含交易後餘額） |
+| `#/categories` | CategoriesPage | 分類管理 | 支出／收入頁籤、兩層清單、編輯面板（圖示、顏色）、刪除前搬移交易 |
+| `#/budgets` | BudgetsPage | 預算 | 月份切換、總預算圓環＋時間進度＋月底推估、分類進度條、未設預算的支出、近 6 個月達成率 |
+| `#/reports` | ReportsPage | 報表 | 單頁四區塊：淨資產趨勢、收支結構、每日收支、分類趨勢；頂端錨點導覽 |
+| `#/investments` | InvestmentsPage | 投資持倉 | `?account=` 切換帳戶；五格摘要、持倉表、資產配置、最近投資交易 |
+| `#/import` | ImportPage | CSV 匯入精靈 | 四步驟精靈＋匯入紀錄（整批撤銷） |
+| `#/settings` | SettingsPage | 設定 | 個人資料、外觀、記帳偏好、匯率、資料與備份 |
+| `#/admin` | AdminPage | 管理頁 | 使用者核准／停用、排程工作、系統用量（`meta.admin`） |
+
+對話框不另開路由：記帳視窗（TransactionDialog）、投資交易視窗（TradeDialog）、計算機（CalculatorPanel）以元件形式開在目前頁面上。
 
 守衛：沒有通行證只能看登入頁，並記住原路徑（`redirect`，只接受站內路徑）；已登入時不顯示登入頁；管理頁只給管理員（後端也會擋）。
 
@@ -767,7 +774,8 @@ sequenceDiagram
 | Store | 職責 |
 |---|---|
 | `auth` | 登入、登出、目前使用者、偏好設定 |
-| `accounts` | 帳戶清單（含餘額）、依 kind 分組的 getter、CRUD、排序（樂觀更新，失敗回滾） |
+| `ui` | 主題（深色／淺色／跟隨系統）、收支顏色方案、計算機開關與帶入目標、側邊欄收合 |
+| `accounts` | 帳戶清單（含餘額）、依 kind 分組的 getter、CRUD、排序與顯示開關（樂觀更新，失敗回滾） |
 | `categories` | 分類清單、樹狀 getter、`label(id)` |
 | `transactions` | 目前篩選條件與分頁結果、CRUD；寫入成功後通知 `accounts` 重新載入 |
 | `transactionBatch` | 表格模式的列狀態、即時檢查、草稿暫存、送出與錯誤對應 |
@@ -776,34 +784,163 @@ sequenceDiagram
 | `investments` | 持倉、投資交易、證券搜尋 |
 | `fx` | 最新匯率、`toBase()` 顯示用換算 |
 
-比照 to-do-schedule：store 的動作成功後用通知元件顯示「已新增…」，失敗由 `api.js` 統一顯示後端的 `detail`。
+比照 to-do-schedule：store 的動作成功後用 Toast 顯示「已新增…」，失敗由 `api.js` 統一顯示後端的 `detail`。
 
-### 5.3 主要元件
+### 5.3 視覺設計系統（Design tokens）
 
-```mermaid
-graph TD
-    App --> ML[MainLayout<br/>側邊欄 / 時鐘 / 深淺色切換]
-    ML --> RV[router-view]
-    ML --> FAB[快速記帳按鈕]
-    App --> Calc[CalculatorPanel 全域]
-    FAB --> TxDlg[TransactionDialog]
-    RV --> TxDlg
-    TxDlg --> MI[MoneyInput<br/>算式 / 計算機]
-    TxDlg --> AS[AccountSelect]
-    TxDlg --> CS[CategorySelect 兩層]
-    RV --> TradeDlg[TradeDialog]
-    TradeDlg --> SS[SecuritySearch]
-    TradeDlg --> MI
-    RV --> IW[ImportWizard]
-    RV --> TG[TransactionGrid / TransactionCardList<br/>表格模式]
-    TG --> MI
+風格：**深色為主的科技感**——接近黑的深藍底、青色主色、等寬數字、淡點陣網格背景、重點卡片帶青色光暈。淺色模式維持同一套結構，只換色值。
+
+**顏色**（CSS 變數，定義在 `css/main.css`；Tailwind 透過 `@theme` 對應成 `bg-panel`、`text-muted` 等 class）
+
+| Token | 用途 | 深色 | 淺色 |
+|---|---|---|---|
+| `--bg` | 頁面底色 | `#080C14` | `#F3F6FA` |
+| `--panel` | 卡片、側邊欄 | `#0F1520` | `#FFFFFF` |
+| `--panel2` | 次要底色（輸入框、表頭、子列） | `#141C2A` | `#F7F9FC` |
+| `--line` | 邊框、分隔線 | `#1E2A3C` | `#DDE4EE` |
+| `--text` | 主要文字 | `#E6EDF7` | `#0F172A` |
+| `--muted` | 次要文字、標籤 | `#93A3B8` | `#475569` |
+| `--accent` | 主色（按鈕、選取、連結、圖表主線） | `#22D3EE` | `#0E7490` |
+| `--accent-ink` | 主色按鈕上的文字 | `#04202A` | `#FFFFFF` |
+| `--accent-soft` | 主色淡底、光暈 | `rgba(34,211,238,.12)` | `rgba(14,116,144,.10)` |
+| `--inc` | 收入、正向、成功 | `#34D399` | `#047857` |
+| `--exp` | 支出、負債、錯誤 | `#FB7185` | `#BE123C` |
+| `--warn` | 警示（預算 ≥ 80%、手動報價、修改中） | `#FBBF24` | `#B45309` |
+| `--c1`～`--c6` | 圖表分類色（青、藍、紫、琥珀、粉、灰） | `#22D3EE` `#60A5FA` `#A78BFA` `#FBBF24` `#F472B6` `#64748B` | `#0891B2` `#2563EB` `#7C3AED` `#D97706` `#DB2777` `#94A3B8` |
+
+- 文字對比：主要與次要文字在 `--panel`、`--panel2` 上都達 WCAG AA（4.5:1）。
+- **收入／支出不只靠顏色**：金額一律帶 `+`／`−` 號；轉帳用灰色與 `⇄`。設定「紅收綠支」時只對調 `--inc`／`--exp` 的值。
+- 預算進度色：< 80% `--inc`、≥ 80% `--warn`、> 100% `--exp`（門檻依使用者設定）。
+
+**字體**（以 `@fontsource` 套件自帶，不從外部載入）
+
+| 用途 | 字體 | 規則 |
+|---|---|---|
+| 標題、Logo | Space Grotesk ＋ Noto Sans TC | 頁標題 28px／700、區塊標題 16–18px／600 |
+| 內文 | Inter ＋ Noto Sans TC | 14px 為主 |
+| **所有數字** | JetBrains Mono | 金額、日期、匯率、股數一律等寬（`font-variant-numeric: tabular-nums`），右對齊 |
+| 小標籤 | JetBrains Mono | 11px、大寫、字距 0.12em、`--muted`（例如 `NET WORTH`） |
+
+**其他**
+
+| 項目 | 值 |
+|---|---|
+| 圓角 | 卡片 14px、輸入框與按鈕 10px、小標籤 6px、對話框 18px |
+| 間距 | 4px 為基準；卡片內距 16–24px、區塊間距 16–20px |
+| 點擊目標 | 最小 44×44px |
+| 光暈 | 重點卡片：`box-shadow: 0 0 0 1px var(--accent-soft), 0 0 32px var(--accent-soft)` |
+| 背景 | `radial-gradient(var(--dot) 1px, transparent 1px)`，間距 22px |
+| 圖示 | lucide（線條圖示，stroke 2），不使用 emoji |
+
+### 5.4 Tailwind CSS 設定
+
+- 版本：Tailwind CSS v4，使用 `@tailwindcss/vite` 外掛，設定寫在 CSS（不需要 `tailwind.config.js`）。
+- `src/css/main.css` 結構：
+
+```css
+@import "tailwindcss";
+
+/* 深色模式由 <html class="dark"> 控制 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root { --bg:#F3F6FA; --panel:#FFFFFF; /* …淺色 tokens… */ }
+.dark  { --bg:#080C14; --panel:#0F1520; /* …深色 tokens… */ }
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-inc: var(--inc);
+  --color-exp: var(--exp);
+  --color-warn: var(--warn);
+  --font-sans: "Inter", "Noto Sans TC", system-ui, sans-serif;
+  --font-head: "Space Grotesk", "Noto Sans TC", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --radius-card: 14px;
+}
+
+@utility num  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+@utility lbl  { font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+@utility glow { box-shadow: 0 0 0 1px var(--accent-soft), 0 0 32px var(--accent-soft); }
 ```
 
-### 5.4 響應式與主題
+- 頁面一律用 token class（`bg-panel border-line text-muted`），**不寫死色碼**；這樣深淺色只靠切換 `.dark` 就完成，不需要到處寫 `dark:` 前綴。
+- 可重複的樣式抽成 Vue 元件（5.5），不使用大量 `@apply`。
+- 互動行為（對話框、下拉選單、分頁、開關、日期選擇、Toast）使用 **Reka UI**（無樣式的 Vue 元件，負責鍵盤操作、焦點管理與無障礙屬性），外觀全部用 Tailwind 自己寫。
 
-- 斷點：寬度 < 1024px 為手機／平板（卡片列表、全螢幕對話框、收合選單）；≥ 1024px 為桌面（表格、常駐側邊欄）。實際數值依 UI 設計與選定的元件庫調整。
-- 深色／淺色：沒選過就跟隨系統，選擇存 localStorage（比照 to-do-schedule `utils/theme.js`）。
-- 收入／支出顏色：預設收入綠、支出紅；設定可改為「紅收綠支」。
+### 5.5 元件清單
+
+**基礎元件（`components/ui/`）**
+
+| 元件 | 說明 | Reka UI |
+|---|---|---|
+| `AppButton` | `variant`: primary（青底）／ghost（框線）／danger（紅框）；`size`: md 44px／sm 36px；`loading` | — |
+| `IconButton` | 只有圖示的方形按鈕，必填 `aria-label`（例如主題切換） | — |
+| `AppCard` | 卡片容器；`glow` 屬性加光暈 | — |
+| `StatCard` | 小標籤＋大數字＋說明（總覽、預算、投資、帳戶詳細的摘要格） | — |
+| `SegmentedControl` | 分段切換（類型、期間、主題、收支顏色） | ToggleGroup |
+| `TabList` | 頁籤（分類支出／收入、記帳類型） | Tabs |
+| `TextField`／`SelectField`／`ComboboxField` | 有標籤、提示文字、錯誤訊息的輸入元件 | Select、Combobox |
+| `DateField` | 日期輸入＋月曆；可設定最早可選日期（開戶日期） | DatePicker |
+| `MoneyInput` | 金額輸入，支援算式（`120+35`）與開啟計算機；依幣別小數位數顯示 | — |
+| `Switch` | 開關（帳戶顯示） | Switch |
+| `AppDialog` | 對話框；手機全螢幕 | Dialog |
+| `ConfirmDialog` | 刪除、撤銷等確認 | AlertDialog |
+| `ToastHost` | 右上角通知（成功／錯誤） | Toast |
+| `Badge` | 狀態標籤（新增、修改、錯誤、系統、待核准…） | — |
+| `ProgressBar` | 進度條；可加「時間進度線」與「推估標記」 | — |
+| `MonthSwitcher` | ‹ 2026-11 › 月份切換 | — |
+| `Amount` | 金額顯示：等寬字、正負號、收支顏色、外幣附約當本位幣 | — |
+| `EmptyState` | 沒有資料時的說明與動作按鈕 | — |
+| `ThemeToggle` | 太陽／月亮按鈕，寫入 `ui` store | — |
+
+**功能元件（`components/`）**
+
+| 元件 | 使用頁面 |
+|---|---|
+| `AppSidebar`、`MobileTabBar` | MainLayout（桌面側邊欄／手機底部導覽＋中央記帳鈕） |
+| `TransactionDialog` | 記帳視窗：支出／收入／轉帳、常用項目建議、分類標籤、連續記帳 |
+| `CalculatorPanel` | 全域可拖曳計算機 |
+| `TransactionList`、`TransactionRow` | 明細、帳戶詳細、總覽最近交易 |
+| `TransactionGrid`、`TransactionCardList` | 表格模式（自建 `<table>`＋每格輸入框）／手機卡片清單 |
+| `TradeDialog`、`SecuritySearch` | 投資交易視窗 |
+| `HoldingsTable`、`AllocationBars` | 投資持倉 |
+| `BudgetRing`、`BudgetRow` | 預算 |
+| `NetWorthChart`、`BreakdownDonut`、`DailyBars`、`TrendLine` | 報表、總覽（Chart.js） |
+| `ImportWizard`、`ColumnMapper`、`ImportPreviewTable` | CSV 匯入 |
+| `CategoryTree`、`IconPicker`、`ColorPicker` | 分類管理 |
+
+### 5.6 版面與響應式
+
+| 寬度 | 版面 |
+|---|---|
+| ≥ 1024px（`lg`） | 左側固定側邊欄（232–260px）＋內容區（內距 28–32px）；表格顯示完整欄位；對話框置中 |
+| 640–1023px | 側邊欄收合成可展開的抽屜；卡片改為單欄或雙欄 |
+| < 640px | 底部導覽列（總覽、明細、記帳、報表、更多）；表格改為卡片清單；對話框全螢幕；表格模式改為 `TransactionCardList` |
+
+- 寬表格（持倉、表格模式、匯入預覽）放在 `overflow-x-auto` 容器中，不讓整頁橫向捲動。
+- 側邊欄＋內容用 `flex-wrap`，內容區 `flex: 999 1 560px; min-width: 0`，窄螢幕自動換行。
+
+### 5.7 深淺色模式
+
+- 選項：深色／淺色／跟隨系統（預設跟隨系統），存在 localStorage `do-accounts:theme`（讀寫失敗就當作跟隨系統）。
+- 套用方式：在 `<html>` 加或移除 `dark` class。`index.html` 的 `<head>` 放一小段 inline script，在 Vue 載入前就套用，避免重新整理時畫面先白後黑的閃爍。
+- 「跟隨系統」時監聽 `matchMedia('(prefers-color-scheme: dark)')` 的變化。
+- 每頁右上角的 `ThemeToggle` 只在深色／淺色間切換；設定頁提供三個選項。
+- 圖表：Chart.js 的顏色從 CSS 變數讀取（`getComputedStyle`），主題切換時重新繪製。
+
+### 5.8 無障礙
+
+- 所有可點擊的東西都是 `<button>` 或 `<a>`；只有圖示的按鈕一定有 `aria-label`。
+- 點擊目標至少 44×44px；鍵盤可完成所有主要操作（Reka UI 負責對話框、選單的焦點管理）。
+- 圖表提供 `aria-label` 摘要文字；顏色以外一定有文字或符號區分（正負號、狀態標籤文字）。
+- 錯誤訊息用 `role="alert"`，並標在對應欄位下方。
 
 ---
 
@@ -894,7 +1031,7 @@ spring.servlet.multipart.max-file-size=5MB
 
 | 階段 | 內容 | 完成標準 |
 |---|---|---|
-| 階段 0 基礎 | 頁面示意圖確認 → 決定 UI 元件庫（1.5）；monorepo 骨架、Spring Boot 專案、Vite ＋ Vue 前端、登入（直接移植 to-do-schedule 的 AuthFilter／TokenService／GoogleVerifier／UserService／AdminPage）、部署流程 | 可用 Google 登入，GitHub Pages ↔ Railway ↔ Atlas 接通 |
+| 階段 0 基礎 | monorepo 骨架、Spring Boot 專案、Vite ＋ Vue ＋ Tailwind 前端、設計 tokens 與基礎元件（5.3–5.5）、深淺色切換、登入（直接移植 to-do-schedule 的 AuthFilter／TokenService／GoogleVerifier／UserService／AdminPage）、部署流程 | 可用 Google 登入，GitHub Pages ↔ Railway ↔ Atlas 接通 |
 | 階段 1 核心記帳 | 帳戶、分類、交易（收支、轉帳）、首頁、計算機 | 可完成日常記帳，取代舊版 money |
 | 階段 1.5 多筆編輯 | 批次儲存 API、表格模式、從 Excel 貼上、草稿、手機卡片清單 | 可一次輸入 20 筆發票並一起儲存；一列有錯時一筆都不寫入 |
 | 階段 2 預算與報表 | 匯率排程、預算、四種報表 | 涵蓋舊版 money 全部功能 |
@@ -921,6 +1058,6 @@ spring.servlet.multipart.max-file-size=5MB
 | ADR-09 | 持倉即時計算，不存持倉集合 | 修改或刪除歷史交易後不會不同步 | 每次查詢都要重算；單一證券的交易筆數少，成本很低 |
 | ADR-10 | 索引在啟動後背景建立 | 有索引才能做日期與帳戶查詢；背景建立又不會像 `auto-index-creation` 那樣讓本機沒有 MongoDB 時無法啟動 | 第一次部署的頭幾秒查詢可能沒有索引 |
 | ADR-11 | 不遷移舊版 money 資料 | 使用者已確認從零開始 | 之後若需要，可寫腳本：舊 MongoDB → JSON 備份格式 → 用備份還原 |
-| ADR-12 | UI 元件庫延後決定 | 使用者希望先確認 UI 設計；元件庫只影響前端畫面層 | 選定前，頁面元件不開始實作；前端邏輯層（stores、services、utils）可先做 |
+| ADR-12 | UI 採 Tailwind CSS v4 ＋ Reka UI，不用 Quasar | 先做示意圖再選；示意圖為自訂科技風格，Tailwind 最容易精準實作；Reka UI 補上對話框、選單、日期選擇的無障礙行為 | 與 to-do-schedule 的 UI 寫法不同，基礎元件（按鈕、卡片、輸入框等）要自己做一套（5.5） |
 | ADR-13 | 交易加 `version` 樂觀鎖 | 表格模式會先載入再修改，中間可能被其他分頁或裝置改過；有版本號才能偵測並拒絕覆蓋 | 單筆編輯也必須帶 `version`；前端要保存載入時的版本 |
 | ADR-14 | 多筆儲存採「先全部檢查、再寫入、失敗補償」，不使用 MongoDB 多文件交易 | 與 ADR-02 一致，不必設定 `MongoTransactionManager`，本機獨立 MongoDB 也能開發；檢查都在寫入前完成，寫入階段失敗的機率很低 | 補償不是真正的交易：在補償完成前的極短時間內，其他請求可能看到一半的結果；補償失敗需依日誌人工還原。若之後要更嚴格，Atlas 支援多文件交易，可在此服務加上 `@Transactional` |
