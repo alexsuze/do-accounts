@@ -10,7 +10,7 @@
 <script setup>
 import { computed } from 'vue'
 
-// 每日餘額走勢（帳戶詳細頁）。階段 2 報表改用 Chart.js；這裡只需要一條線，用 SVG 即可
+// 單線走勢（帳戶詳細頁的每日餘額、總覽的淨資產趨勢），SVG 繪製
 const props = defineProps({ points: { type: Array, required: true }, label: { type: String, default: '每日餘額走勢' } })
 const W = 900
 const H = 180

@@ -6,6 +6,7 @@ import com.doaccounts.service.UserService;
 import com.doaccounts.service.UserService.LoginResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -35,5 +36,11 @@ public class AuthController {
     @GetMapping("/me")
     public User me(@RequestAttribute(AuthFilter.USER) User user) {
         return user;
+    }
+
+    /** body：{ base_currency, week_start, budget_warn_pct }，省略的欄位不變 */
+    @PutMapping("/me/settings")
+    public User settings(@RequestAttribute(AuthFilter.USER) User user, @RequestBody UserService.SettingsRequest req) {
+        return service.updateSettings(user, req);
     }
 }

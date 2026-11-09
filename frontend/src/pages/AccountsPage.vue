@@ -20,7 +20,7 @@
                 <button type="button" class="drag flex size-8 cursor-grab items-center justify-center text-muted" :aria-label="`拖曳排序 ${a.name}`"><GripVertical :size="16" aria-hidden="true" /></button>
                 <button type="button" class="flex min-w-0 flex-[1_1_180px] flex-col items-start gap-0.5 text-left text-text" @click="select(a)">
                   <span class="font-semibold">{{ a.name }}</span>
-                  <span class="num text-xs text-muted">開戶 {{ a.opening_date }} · 初始 {{ formatAmount(a.opening_balance, a.currency) }}{{ a.visible ? '' : ' · 總覽隱藏' }}</span>
+                  <span class="num text-xs text-muted">開戶 {{ a.opening_date }} · 初始 {{ formatAmount(a.opening_balance, a.currency) }}{{ a.visible ? '' : ' · 總覽隱藏（不計入淨資產）' }}</span>
                 </button>
                 <span class="num rounded-md border border-line px-2 py-0.5 text-xs text-muted">{{ a.currency }}</span>
                 <RouterLink :to="`/accounts/${a.id}`" class="flex min-w-[110px] flex-col items-end no-underline">

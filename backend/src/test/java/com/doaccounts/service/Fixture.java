@@ -1,9 +1,14 @@
 package com.doaccounts.service;
 
 import com.doaccounts.model.Account;
+import com.doaccounts.model.Budget;
+import com.doaccounts.model.ExchangeRate;
+import com.doaccounts.model.User;
 import com.doaccounts.model.Category;
 import com.doaccounts.model.Transaction;
 import com.doaccounts.repository.AccountRepository;
+import com.doaccounts.repository.BudgetRepository;
+import com.doaccounts.repository.ExchangeRateRepository;
 import com.doaccounts.repository.CategoryRepository;
 import com.doaccounts.repository.TransactionRepository;
 import com.doaccounts.service.AccountService.AccountRequest;
@@ -37,16 +42,27 @@ class Fixture {
     final List<Account> accounts = new ArrayList<>();
     final List<Category> categories = new ArrayList<>();
     final List<Transaction> transactions = new ArrayList<>();
+    final List<Budget> budgets = new ArrayList<>();
+    final List<ExchangeRate> rates = new ArrayList<>();
 
     final AccountRepository accountRepo = mock(AccountRepository.class);
     final CategoryRepository categoryRepo = mock(CategoryRepository.class);
     final TransactionRepository txRepo = mock(TransactionRepository.class);
     final LedgerQueries ledger = mock(LedgerQueries.class);
+    final BudgetRepository budgetRepo = mock(BudgetRepository.class);
+    final ExchangeRateRepository fxRepo = mock(ExchangeRateRepository.class);
 
     final AccountService accountService = new AccountService(accountRepo, ledger);
     final CategoryService categoryService = new CategoryService(categoryRepo, ledger);
     final TransactionService txService = new TransactionService(txRepo, ledger, accountService, categoryService);
     final TransactionBatchService batchService = new TransactionBatchService(txRepo, ledger, txService);
+    final FxService fxService = new FxService(fxRepo);
+    final BudgetService budgetService = new BudgetService(budgetRepo, categoryService, accountService, ledger, fxService);
+    final ReportService reportService = new ReportService(accountService, categoryService, ledger, fxService, budgetService);
+    final DashboardService dashboardService = new DashboardService(accountService, ledger, fxService, budgetService);
+
+    /** 本位幣 TWD 的使用者 */
+    final User me = user(ME);
 
     private int seq;
 
@@ -111,6 +127,33 @@ class Fixture {
             return null;
         }).when(ledger).removeByIds(anyString(), anyCollection());
         when(ledger.recent(anyString(), anyInt())).thenAnswer(inv -> newestFirst(mine(inv.getArgument(0))).stream().limit((int) inv.getArgument(1)).toList());
+        when(budgetRepo.save(any(Budget.class))).thenAnswer(inv -> store(budgets, inv.getArgument(0), "b"));
+        when(budgetRepo.findByUserIdAndMonthLessThanEqual(anyString(), anyString())).thenAnswer(inv -> budgets.stream()
+                .filter(b -> b.userId.equals(inv.getArgument(0)) && b.month.compareTo(inv.getArgument(1)) <= 0).toList());
+        doAnswer(inv -> budgets.remove((Budget) inv.getArgument(0))).when(budgetRepo).delete(any(Budget.class));
+
+        when(fxRepo.save(any(ExchangeRate.class))).thenAnswer(inv -> store(rates, inv.getArgument(0), "r"));
+        when(fxRepo.findById(anyString())).thenAnswer(inv -> rates.stream().filter(r -> r.id.equals(inv.getArgument(0))).findFirst());
+        doAnswer(inv -> rates.remove((ExchangeRate) inv.getArgument(0))).when(fxRepo).delete(any(ExchangeRate.class));
+        when(fxRepo.findByUserIdIsNullAndCurrencyInAndDateLessThanEqual(anyCollection(), anyString())).thenAnswer(inv -> rates.stream()
+                .filter(r -> r.userId == null && ((Collection<?>) inv.getArgument(0)).contains(r.currency) && r.date.compareTo(inv.getArgument(1)) <= 0).toList());
+        when(fxRepo.findByUserIdAndCurrencyInAndDateLessThanEqual(anyString(), anyCollection(), anyString())).thenAnswer(inv -> rates.stream()
+                .filter(r -> inv.getArgument(0).equals(r.userId) && ((Collection<?>) inv.getArgument(1)).contains(r.currency) && r.date.compareTo(inv.getArgument(2)) <= 0).toList());
+        when(fxRepo.findByUserIdOrderByDateDesc(anyString())).thenAnswer(inv -> rates.stream().filter(r -> inv.getArgument(0).equals(r.userId))
+                .sorted((a, b) -> b.date.compareTo(a.date)).toList());
+        when(fxRepo.findFirstByUserIdIsNullAndCurrencyAndDate(anyString(), anyString())).thenAnswer(inv -> rates.stream()
+                .filter(r -> r.userId == null && r.currency.equals(inv.getArgument(0)) && r.date.equals(inv.getArgument(1))).findFirst());
+        when(fxRepo.findFirstByUserIdAndCurrencyAndDate(anyString(), anyString(), anyString())).thenAnswer(inv -> rates.stream()
+                .filter(r -> inv.getArgument(0).equals(r.userId) && r.currency.equals(inv.getArgument(1)) && r.date.equals(inv.getArgument(2))).findFirst());
+        when(fxRepo.existsByUserIdIsNullAndCurrency(anyString())).thenAnswer(inv -> rates.stream().anyMatch(r -> r.userId == null && r.currency.equals(inv.getArgument(0))));
+        when(fxRepo.existsByUserIdIsNullAndDateAndSourceNot(anyString(), anyString())).thenAnswer(inv -> rates.stream()
+                .anyMatch(r -> r.userId == null && r.date.equals(inv.getArgument(0)) && !r.source.equals(inv.getArgument(1))));
+        when(ledger.sumByAccountMonth(anyString())).thenAnswer(inv -> {
+            Map<String, BigDecimal> m = new HashMap<>();
+            mine(inv.getArgument(0)).forEach(t -> t.entries.forEach(e -> m.merge(e.accountId + "|" + t.date.substring(0, 7), e.amount, BigDecimal::add)));
+            return m.entrySet().stream().map(e -> new LedgerQueries.AccountMonth(e.getKey().split("\\|")[0], e.getKey().split("\\|")[1], e.getValue())).toList();
+        });
+
         when(ledger.titleStartsWith(anyString(), anyString(), anyInt())).thenAnswer(inv -> newestFirst(mine(inv.getArgument(0))).stream()
                 .filter(t -> t.title.startsWith(inv.getArgument(1))).toList());
     }
@@ -163,6 +206,23 @@ class Fixture {
     static TransactionRequest transfer(String fromId, String toId, String amount, String toAmount, String fee, String date) {
         return new TransactionRequest("transfer", date, null, null, null, null, fromId, new BigDecimal(amount), toId,
                 toAmount == null ? null : new BigDecimal(toAmount), fee == null ? null : new BigDecimal(fee), null, null);
+    }
+
+    static User user(String id) {
+        User u = new User();
+        u.id = id;
+        u.status = User.ACTIVE;
+        return u;
+    }
+
+    /** 系統匯率：1 currency = rate TWD */
+    ExchangeRate rate(String currency, String date, String rate) {
+        ExchangeRate r = new ExchangeRate();
+        r.currency = currency;
+        r.date = date;
+        r.rate = new BigDecimal(rate);
+        r.source = "test";
+        return store(rates, r, "r");
     }
 
     Optional<Account> find(String id) {

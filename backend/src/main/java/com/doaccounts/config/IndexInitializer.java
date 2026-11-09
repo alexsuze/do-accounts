@@ -1,7 +1,9 @@
 package com.doaccounts.config;
 
 import com.doaccounts.model.Account;
+import com.doaccounts.model.Budget;
 import com.doaccounts.model.Category;
+import com.doaccounts.model.ExchangeRate;
 import com.doaccounts.model.Transaction;
 import com.doaccounts.model.User;
 import org.slf4j.Logger;
@@ -51,5 +53,9 @@ public class IndexInitializer {
         mongo.indexOps(Transaction.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("date", Sort.Direction.DESC));
         mongo.indexOps(Transaction.class).createIndex(new Index().on("entries.account_id", Sort.Direction.ASC).on("date", Sort.Direction.ASC));
         mongo.indexOps(Transaction.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("category_id", Sort.Direction.ASC).on("date", Sort.Direction.DESC));
+        // SD 2.7、2.8
+        mongo.indexOps(Budget.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("month", Sort.Direction.ASC).on("category_id", Sort.Direction.ASC).unique());
+        mongo.indexOps(ExchangeRate.class).createIndex(new Index().on("date", Sort.Direction.ASC).on("currency", Sort.Direction.ASC).on("base", Sort.Direction.ASC).on("user_id", Sort.Direction.ASC).unique());
+        mongo.indexOps(ExchangeRate.class).createIndex(new Index().on("currency", Sort.Direction.ASC).on("user_id", Sort.Direction.ASC).on("date", Sort.Direction.ASC));
     }
 }

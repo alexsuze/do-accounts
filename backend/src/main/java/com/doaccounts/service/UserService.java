@@ -121,12 +121,34 @@ public class UserService {
         return repo.save(u);
     }
 
+    /** 記帳偏好（SD 3.2 PUT /api/auth/me/settings）；欄位為 null 表示不變 */
+    public record SettingsRequest(String baseCurrency, String weekStart, Integer budgetWarnPct) {}
+
+    public User updateSettings(User user, SettingsRequest req) {
+        User u = repo.findById(user.id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "找不到此使用者"));
+        User.Settings st = u.settingsOrDefault();
+        if (req.baseCurrency() != null) {
+            if (!Currencies.supported(req.baseCurrency())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支援的幣別：" + req.baseCurrency());
+            u.baseCurrency = req.baseCurrency();
+        }
+        if (req.weekStart() != null) {
+            if (!Set.of("mon", "sun").contains(req.weekStart())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "每週起始日只能是星期一或星期日");
+            st.weekStart = req.weekStart();
+        }
+        if (req.budgetWarnPct() != null) {
+            if (req.budgetWarnPct() < 1 || req.budgetWarnPct() > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "預算警示門檻需在 1～100 之間");
+            st.budgetWarnPct = req.budgetWarnPct();
+        }
+        u.settings = st;
+        return repo.save(u);
+    }
+
     private boolean isAdminEmail(String email) {
         String admin = props.auth().adminEmail();
         return admin != null && !admin.isBlank() && admin.trim().equalsIgnoreCase(email);
     }
 
-    private static void requireAdmin(User u) {
+    public static void requireAdmin(User u) {
         if (!u.admin) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "只有管理員可以使用");
     }
 }

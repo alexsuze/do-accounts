@@ -54,6 +54,24 @@ public class LedgerQueries {
         return out;
     }
 
+    /** 每個帳戶每個月的分錄加總（淨資產趨勢，SD 4.6 步驟 1） */
+    public List<AccountMonth> sumByAccountMonth(String userId) {
+        Aggregation agg = Aggregation.newAggregation(
+                match(where("user_id").is(userId)),
+                unwind("entries"),
+                Aggregation.project().and("entries.account_id").as("account_id").and("entries.amount").as("amount")
+                        .and(org.springframework.data.mongodb.core.aggregation.StringOperators.Substr.valueOf("date").substring(0, 7)).as("month"),
+                group("account_id", "month").sum("amount").as("sum"));
+        List<AccountMonth> out = new ArrayList<>();
+        for (Document d : mongo.aggregate(agg, "transactions", Document.class).getMappedResults()) {
+            Document id = d.get("_id", Document.class);
+            out.add(new AccountMonth(id.getString("account_id"), id.getString("month"), toBigDecimal(d.get("sum"))));
+        }
+        return out;
+    }
+
+    public record AccountMonth(String accountId, String month, BigDecimal sum) {}
+
     public boolean hasTransactions(String userId, String accountId) {
         return mongo.exists(Query.query(where("user_id").is(userId).and("entries.account_id").is(accountId)), Transaction.class);
     }

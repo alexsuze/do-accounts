@@ -8,6 +8,11 @@
       </RouterLink>
     </nav>
     <div class="mt-auto flex flex-col gap-3">
+      <RouterLink v-if="fx.latest.length" to="/settings" class="flex flex-col gap-1.5 rounded-[14px] border border-line bg-panel2 p-3.5 text-text no-underline hover:border-accent"
+        aria-label="匯率（前往設定）">
+        <span class="lbl">匯率 · {{ shortDate(fx.date) }}</span>
+        <span v-for="r in fx.latest" :key="r.currency" class="num flex justify-between text-[13px]"><span>{{ r.currency }}</span><span>{{ Number(r.rate).toFixed(r.rate >= 1 ? 3 : 4) }}</span></span>
+      </RouterLink>
       <div class="rounded-[14px] border border-line bg-panel2 p-3.5">
         <div class="lbl">Now · 台北</div>
         <div class="num mt-1 text-[13px]">{{ now }}</div>
@@ -22,17 +27,21 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLogo from './ui/AppLogo.vue'
 import { NAV } from '../router'
 import { useAuthStore } from '../stores/auth'
 import { useClock } from '../composables/useClock'
+import { useFxStore } from '../stores/fx'
+import { shortDate } from '../utils/date'
 
 // 桌面側邊欄（≥ 1024px，SD 5.6）
 const auth = useAuthStore()
 const route = useRoute()
 const now = useClock()
+const fx = useFxStore()
+onMounted(() => fx.ensure())
 const items = computed(() => auth.isAdmin ? [...NAV, { no: '11', label: '管理', to: '/admin' }] : NAV)
 const initial = computed(() => (auth.user?.name || auth.user?.email || '?').slice(0, 1).toUpperCase())
 
