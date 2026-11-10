@@ -4,7 +4,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 文件版本 | 0.6 |
+| 文件版本 | 0.7 |
 | 系統版本 | 2.0.0（規劃中） |
 | 撰寫日期 | 2026-11-09 |
 | 文件性質 | 系統設計（SD） |
@@ -13,6 +13,8 @@
 
 > v0.2 變更：後端改為 Java（Spring Boot），整體技術架構比照 to-do-schedule。
 > 資料庫因此改回 MongoDB Atlas，登入改為 Google 登入＋管理員核准。
+> v0.7 變更：階段 5 實作——每月報表 Email（4.9）、PWA 與快捷鍵（5.9、ADR-18）、期初持股（2.6、4.5）。
+>
 > v0.6 變更：階段 4 實作——投資交易分錄角色（2.6）、手動報價只影響自己（2.6）、投資 API 格式（3.9）、計算與報價細節（4.5）、備份格式第 2 版含證券。
 >
 > v0.5 變更：階段 3 實作——CSV 改在瀏覽器解析、取消 import_previews（2.9、4.7、ADR-17）、匯入匯出與備份 API 格式（3.10）。
@@ -172,7 +174,7 @@ do-accounts/
 | status | string | `pending` 待核准 / `active` 使用中 / `disabled` 已停用 |
 | admin | boolean | `ADMIN_EMAIL` 的帳號登入時自動設為 true 並啟用 |
 | base_currency | string | 本位幣，預設 `TWD` |
-| settings | object | `{ week_start: mon/sun, budget_warn_pct: 1～100（預設 80） }`；舊文件沒有時用預設值。收支顏色存在瀏覽器（`do-accounts:pnl`） |
+| settings | object | `{ week_start: mon/sun, budget_warn_pct: 1～100（預設 80）, monthly_report: boolean（每月報表 Email，預設關閉） }`；舊文件沒有時用預設值。收支顏色存在瀏覽器（`do-accounts:pnl`） |
 | created_at / last_login_at | Date | |
 
 ### 2.3 accounts
@@ -774,6 +776,13 @@ sequenceDiagram
 
 ---
 
+### 4.9 每月報表 Email（`MonthlyReportService`）
+
+- 排程：每月 1 日 08:07（Asia/Taipei），寄上個月的報表給設定頁開啟「每月報表 Email」（`users.settings.monthly_report`）的使用中帳號；沒有設定 `RESEND_API_KEY` 時直接略過。
+- 內容：收入、支出、結餘；支出前 5 名大類（含百分比）；總預算（或分類預算合計）使用率與超支金額；月底淨資產與比上月的變化（含投資市值）；「查看完整報表」連結（`FRONTEND_URL`）。HTML 全部行內樣式，使用者輸入的名稱一律跳脫；另附純文字版本。
+- 失敗時同一位使用者再試一次，仍失敗記錄日誌、繼續寄下一位（NFR-7）。
+- API：`GET /api/reports/monthly-email/preview?month=`（`{ subject, html, text }`，不寄出）、`POST /api/reports/monthly-email/test`（寄上個月的報表給自己，每人 1 分鐘一次）；管理員 `POST /api/admin/jobs/monthly-report`。
+
 ## 5. 前端設計
 
 > 頁面示意圖（18 張，可切換深淺色、可點擊操作）：https://claude.ai/artifact/H4g7zeUWK4nhE9SA4ET5vM
@@ -976,6 +985,13 @@ sequenceDiagram
 
 ---
 
+### 5.9 PWA、快捷鍵
+
+- **PWA**：`public/manifest.webmanifest`（名稱、圖示 192／512／maskable、主畫面捷徑「記帳」`#/?new=1`、「明細」）、`public/sw.js`、`index.html` 的 `theme-color` 與 `apple-touch-icon`。正式環境才註冊 Service Worker（`main.js`）。
+- **Service Worker 策略**（自寫，不引入套件，ADR-18）：只處理同網域 GET。頁面網路優先、離線時用快取的首頁；`/assets/`（檔名帶雜湊）快取優先，最多保留 80 個檔；其他靜態檔先回快取再背景更新。API 在另一個網域（Railway），一律走網路，不做離線記帳。
+- **快捷鍵**（SA FR-11.4，`utils/shortcuts.js`）：`N` 記帳、`/` 跳到明細並聚焦搜尋框、`?` 顯示快捷鍵說明、`Esc` 關閉視窗（Reka UI）。正在輸入文字、輸入法組字中、按著 Ctrl／⌘／Alt、或已有視窗開著時不觸發。
+- **回到頂部**（SA FR-11.2）：捲動超過一個畫面高度時出現在右下角（手機在底部導覽上方）。
+
 ## 6. 部署與環境設計
 
 ### 6.1 環境
@@ -1008,7 +1024,7 @@ sequenceDiagram
 | `JWT_SECRET` | 通行證簽章密鑰，≥ 32 字元；可在 Railway 填 `${{ secret(64) }}` |
 | `CORS_ALLOWED_ORIGIN` | `https://alexsuze.github.io` |
 | `FRONTEND_URL` | `https://alexsuze.github.io/do-accounts/` |
-| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | 選用，新帳號通知信 |
+| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | 選用，新帳號通知信、每月報表 Email（使用 Resend 預設寄件地址時只能寄到 Resend 帳號本人的信箱，要寄給其他人需驗證自己的網域） |
 
 **前端（GitHub Secrets）**：`VITE_API_BASE_URL`、`VITE_GOOGLE_CLIENT_ID`
 
@@ -1096,4 +1112,5 @@ spring.servlet.multipart.max-file-size=5MB
 | ADR-15 | 圖表用自製 SVG 元件，不用 Chart.js | 示意圖的圖表都是簡單的長條、折線、環形；SVG 可完全照示意圖畫，顏色直接用 CSS 變數；不增加約 200 KB 的套件 | 沒有內建的互動（縮放、圖例切換）；提示用 `<title>`；之後若需要複雜圖表再引入 |
 | ADR-16 | 匯率以 TWD 為中介保存 | 免費來源以 TWD 為基準最完整；只存一份就能支援任何本位幣（交叉匯率） | 本位幣不是 TWD 時換算多一次除法；手動匯率也以 TWD 表示 |
 | ADR-17 | CSV 在瀏覽器解析，後端只收整理好的資料列；不暫存預覽 | 沿用表格模式貼上已有的日期、金額、民國年解析；`TextDecoder` 原生支援 Big5；調整欄位對應能立即看到結果；後端不需要 multipart 與暫存集合，確認時重新檢查即可 | 一萬列的 JSON 約 1～2 MB；檢查規則仍全部在後端，前端解析錯誤只會變成後端回報的錯誤列 |
+| ADR-18 | PWA 的 Service Worker 自己寫，不用 vite-plugin-pwa | 需求只有「可加到主畫面＋離線時打得開」，約 60 行即可；不增加建置依賴（該套件的 workbox 依賴鏈有已知的建置期弱點警告） | 沒有預先快取清單（第一次開啟後才快取打包檔）；改快取策略時要手動調整 `sw.js` 的 VERSION |
 | ADR-14 | 多筆儲存採「先全部檢查、再寫入、失敗補償」，不使用 MongoDB 多文件交易 | 與 ADR-02 一致，不必設定 `MongoTransactionManager`，本機獨立 MongoDB 也能開發；檢查都在寫入前完成，寫入階段失敗的機率很低 | 補償不是真正的交易：在補償完成前的極短時間內，其他請求可能看到一半的結果；補償失敗需依日誌人工還原。若之後要更嚴格，Atlas 支援多文件交易，可在此服務加上 `@Transactional` |

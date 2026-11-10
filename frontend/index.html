@@ -6,6 +6,13 @@
     <meta name="color-scheme" content="dark light" />
     <title>do-accounts</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <!-- PWA：可加到手機主畫面（SD 5.9） -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" content="#080C14" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="do-accounts" />
     <script>
       // 在 Vue 載入前套用主題，避免重新整理時畫面閃爍（SD 5.7）。邏輯與 src/utils/theme.js 相同
       (function () {

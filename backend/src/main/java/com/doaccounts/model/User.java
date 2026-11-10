@@ -44,6 +44,9 @@ public class User {
         /** 預算警示門檻（%），達到時進度條變橘色（SA FR-5.5） */
         @Field("budget_warn_pct")
         public int budgetWarnPct = 80;
+        /** 每月 1 日寄上個月的報表 Email（SD 4.9） */
+        @Field("monthly_report")
+        public boolean monthlyReport;
     }
 
     /** 讀取偏好設定，舊文件沒有 settings 時回預設值 */

@@ -86,6 +86,21 @@
         </AppCard>
 
         <AppCard>
+          <h2 class="m-0 mb-1 font-head text-base font-semibold">通知</h2>
+          <div class="flex flex-wrap items-center gap-3 border-b border-line py-3.5">
+            <label class="mr-auto flex cursor-pointer flex-col gap-0.5" for="monthly-switch">
+              <span>每月報表 Email</span>
+              <span class="text-xs text-muted">每月 1 日早上寄上個月的收支、支出前五名、預算與淨資產到 {{ auth.user?.email }}</span>
+            </label>
+            <SwitchField id="monthly-switch" :model-value="prefs.monthly_report" label="每月報表 Email" @update:model-value="v => save({ monthly_report: v })" />
+          </div>
+          <div class="flex flex-wrap items-center gap-2.5 py-3.5">
+            <AppButton variant="ghost" :loading="busyMail === 'preview'" @click="previewMail"><Eye :size="16" aria-hidden="true" />預覽上個月</AppButton>
+            <AppButton variant="ghost" :loading="busyMail === 'test'" @click="testMail"><Send :size="16" aria-hidden="true" />寄測試信給我</AppButton>
+          </div>
+        </AppCard>
+
+        <AppCard>
           <h2 class="m-0 mb-1 font-head text-base font-semibold">資料與備份</h2>
           <div class="flex flex-wrap items-center gap-3 border-b border-line py-3.5">
             <span class="mr-auto flex flex-col gap-0.5"><span>完整備份</span><span class="text-xs text-muted">帳戶、分類、交易、預算、手動匯率、匯入範本，JSON 檔</span></span>
@@ -123,6 +138,9 @@
         <AppButton type="submit" form="fx-form" :loading="busy">儲存</AppButton>
       </template>
     </AppDialog>
+    <AppDialog v-model:open="mailPreview.open" :title="mailPreview.subject || '每月報表預覽'" description="實際寄出的信件內容（信箱程式的顯示可能略有不同）" :width="640">
+      <iframe :srcdoc="mailPreview.html" title="每月報表預覽" sandbox="" class="h-[60vh] w-full rounded-[10px] border border-line bg-white" />
+    </AppDialog>
     <ConfirmDialog v-model:open="restoreOpen" :title="`從「${restoreFile?.name}」還原？`" confirm-text="還原"
       :description="restoreFile?.summary" @confirm="restore" />
     <ConfirmDialog v-model:open="baseConfirm" :title="`本位幣改成 ${pendingBase}？`" confirm-text="變更"
@@ -133,7 +151,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Download, LogOut, Upload } from 'lucide-vue-next'
+import { Download, Eye, LogOut, Send, Upload } from 'lucide-vue-next'
 import AppButton from '../components/ui/AppButton.vue'
 import AppCard from '../components/ui/AppCard.vue'
 import AppDialog from '../components/ui/AppDialog.vue'
@@ -141,6 +159,7 @@ import Badge from '../components/ui/Badge.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 import DateField from '../components/ui/DateField.vue'
 import SelectField from '../components/ui/SelectField.vue'
+import SwitchField from '../components/ui/SwitchField.vue'
 import TextField from '../components/ui/TextField.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import SegmentedControl from '../components/ui/SegmentedControl.vue'
@@ -169,7 +188,8 @@ const fx = useFxStore()
 const prefs = computed(() => ({
   base_currency: auth.user?.base_currency || 'TWD',
   week_start: auth.user?.settings?.week_start || 'mon',
-  budget_warn_pct: auth.user?.settings?.budget_warn_pct ?? 80
+  budget_warn_pct: auth.user?.settings?.budget_warn_pct ?? 80,
+  monthly_report: !!auth.user?.settings?.monthly_report
 }))
 const warn = ref(String(prefs.value.budget_warn_pct))
 watch(() => prefs.value.budget_warn_pct, v => { warn.value = String(v) })
@@ -235,6 +255,28 @@ async function removeManual (r) {
   await loadFx()
 }
 onMounted(loadFx)
+
+// ---------- 每月報表 Email ----------
+const busyMail = ref('')
+const mailPreview = reactive({ open: false, subject: '', html: '' })
+async function previewMail () {
+  busyMail.value = 'preview'
+  try {
+    const { data } = await api.get('/reports/monthly-email/preview')
+    Object.assign(mailPreview, { open: true, subject: data.subject, html: data.html })
+  } finally {
+    busyMail.value = ''
+  }
+}
+async function testMail () {
+  busyMail.value = 'test'
+  try {
+    const { data } = await api.post('/reports/monthly-email/test', null, { timeout: 30000 })
+    toast.success(`已寄出 ${data.month} 的報表到 ${data.to}`)
+  } finally {
+    busyMail.value = ''
+  }
+}
 
 // ---------- 備份與還原（SA FR-10.8） ----------
 const busyBackup = ref(false)

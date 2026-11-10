@@ -3,7 +3,7 @@
     <PageHeader eyebrow="Transactions" title="明細">
       <AppButton variant="ghost" :loading="exporting" @click="exportCsv"><Download :size="16" aria-hidden="true" />匯出 CSV</AppButton>
       <AppButton variant="ghost" :to="{ path: '/transactions/grid', query: gridQuery }"><Table :size="16" aria-hidden="true" />表格編輯</AppButton>
-      <AppButton @click="ui.openTx()"><Plus :size="16" aria-hidden="true" />記帳</AppButton>
+      <AppButton title="記帳（快捷鍵 N）" @click="ui.openTx()"><Plus :size="16" aria-hidden="true" />記帳</AppButton>
     </PageHeader>
 
     <AppCard class="flex flex-wrap items-end gap-3">
@@ -13,7 +13,7 @@
       <div class="w-full sm:w-48"><SelectField :model-value="filter.category" :options="categoryOpts" none-label="全部分類" placeholder="全部分類" @update:model-value="v => setFilter({ category: v })" /></div>
       <label class="flex h-11 min-w-0 flex-[1_1_200px] items-center gap-2 rounded-[10px] border border-line bg-panel2 px-3 text-muted focus-within:border-accent">
         <Search :size="16" aria-hidden="true" />
-        <input v-model="keyword" aria-label="搜尋項目或備註" placeholder="搜尋項目、備註…" class="w-full border-0 bg-transparent text-sm text-text outline-none placeholder:text-muted" @keydown.enter="setFilter({ q: keyword })" @blur="setFilter({ q: keyword })">
+        <input ref="searchEl" v-model="keyword" aria-label="搜尋項目或備註（快捷鍵 /）" placeholder="搜尋項目、備註…" class="w-full border-0 bg-transparent text-sm text-text outline-none placeholder:text-muted" @keydown.enter="setFilter({ q: keyword })" @blur="setFilter({ q: keyword })">
       </label>
     </AppCard>
 
@@ -69,7 +69,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Download, Plus, Search, Table } from 'lucide-vue-next'
 import Amount from '../components/ui/Amount.vue'
@@ -198,6 +198,12 @@ async function load () {
 }
 
 watch(filter, load, { immediate: true, deep: true })
+// 快捷鍵 /：聚焦搜尋框（從別頁按時，頁面掛載後也要聚焦）
+const searchEl = ref(null)
+watch(() => ui.focusSearch, (v) => {
+  if (!v) return
+  nextTick(() => { searchEl.value?.focus(); ui.focusSearch = false })
+}, { immediate: true })
 watch(() => ui.ledgerVersion, load)
 
 function toggle (id) { selected.has(id) ? selected.delete(id) : selected.add(id) }
