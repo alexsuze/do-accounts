@@ -4,6 +4,9 @@ import com.doaccounts.config.AuthFilter;
 import com.doaccounts.model.ExchangeRate;
 import com.doaccounts.model.User;
 import com.doaccounts.service.FxService;
+import com.doaccounts.service.FxUpdater;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.server.ResponseStatusException;
 import com.doaccounts.service.FxService.LatestRate;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,10 +28,27 @@ import java.util.List;
 @RequestMapping("/api/fx")
 public class FxController {
 
-    private final FxService service;
+    /** 「立即更新」的最短間隔（全站共用一份匯率，避免一直打外部 API） */
+    private static final long REFRESH_INTERVAL_MS = 5 * 60_000L;
 
-    public FxController(FxService service) {
+    private final FxService service;
+    private final FxUpdater updater;
+    private volatile long lastRefresh;
+
+    public FxController(FxService service, FxUpdater updater) {
         this.service = service;
+        this.updater = updater;
+    }
+
+    /** 立即重新抓取匯率（與排程相同；5 分鐘內只能一次，否則 429） */
+    @PostMapping("/refresh")
+    public FxUpdater.Result refresh() {
+        long now = System.currentTimeMillis();
+        if (now - lastRefresh < REFRESH_INTERVAL_MS) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "匯率剛更新過，請 5 分鐘後再試");
+        }
+        lastRefresh = now;
+        return updater.update();
     }
 
     @GetMapping("/latest")

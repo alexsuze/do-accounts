@@ -57,6 +57,7 @@
           <div class="flex flex-wrap items-center gap-2.5">
             <h2 class="m-0 mr-auto font-head text-base font-semibold">匯率</h2>
             <span class="num text-xs text-muted">每天 06:00、18:00 自動更新</span>
+            <AppButton variant="ghost" :loading="busyFx" @click="refreshFx"><RefreshCw :size="16" aria-hidden="true" />立即更新</AppButton>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full border-collapse text-sm">
@@ -151,7 +152,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Download, Eye, LogOut, Send, Upload } from 'lucide-vue-next'
+import { Download, Eye, LogOut, RefreshCw, Send, Upload } from 'lucide-vue-next'
 import AppButton from '../components/ui/AppButton.vue'
 import AppCard from '../components/ui/AppCard.vue'
 import AppDialog from '../components/ui/AppDialog.vue'
@@ -255,6 +256,22 @@ async function removeManual (r) {
   await loadFx()
 }
 onMounted(loadFx)
+
+// 立即重新抓取匯率（後端 5 分鐘內只接受一次）
+const busyFx = ref(false)
+async function refreshFx () {
+  busyFx.value = true
+  try {
+    const { data } = await api.post('/fx/refresh', null, { timeout: 30000 })
+    if (data.ok) toast.success(`匯率已更新（資料日期 ${data.date}）`)
+    else toast.warn(data.message)
+    await loadFx()
+  } catch {
+    // 錯誤訊息已由 api.js 顯示（例如 5 分鐘內重複更新）
+  } finally {
+    busyFx.value = false
+  }
+}
 
 // ---------- 每月報表 Email ----------
 const busyMail = ref('')
