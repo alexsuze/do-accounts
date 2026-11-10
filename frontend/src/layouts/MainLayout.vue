@@ -47,10 +47,11 @@ onMounted(() => {
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
-// 主畫面捷徑「記帳」（manifest shortcuts）：#/?new=1 開啟記帳視窗
-watch(() => route.query.new, (v) => {
-  if (v !== '1') return
+// 主畫面捷徑「記帳」（manifest shortcuts）：#/?quick=tx 開啟記帳視窗。
+// 只在總覽處理，且參數名稱不可與各頁自己的 query 重複（帳戶頁用 ?new=1 開新增面板）
+watch(() => [route.name, route.query.quick], ([name, quick]) => {
+  if (name !== 'dashboard' || quick !== 'tx') return
   ui.openTx()
-  router.replace({ query: { ...route.query, new: undefined } })
+  router.replace({ query: { ...route.query, quick: undefined } })
 }, { immediate: true })
 </script>
