@@ -87,7 +87,8 @@ public class FxUpdater {
                 log.warn("匯率來源 {} 失敗：{}", src[0], error);
             }
         }
-        return new Result(false, null, null, Map.of(), "匯率來源都無法連線，沿用最近一筆：" + error);
+        // 詳細原因只寫日誌（含網址等技術細節），畫面上顯示簡短說明
+        return new Result(false, null, null, Map.of(), "匯率來源暫時無法連線，先沿用最近一次的匯率，請稍後再試");
     }
 
     /** 某個幣別完全沒有匯率時寫入初始值，確保第一次部署就能換算 */

@@ -493,6 +493,7 @@ public record TransactionRequest(
 | GET | `/api/fx/manual` | 自己的手動匯率，新到舊 |
 | PUT | `/api/fx/manual` | `{ date, currency, rate }` 手動覆寫（只影響自己；同一天再設定是覆蓋） |
 | DELETE | `/api/fx/manual/{id}` | 移除自己的手動匯率 |
+| POST | `/api/fx/refresh` | 立即重新抓取匯率（與排程相同；全站 5 分鐘內只能一次，否則 429）→ `{ ok, source, date, rates, message }` |
 
 ### 3.9 投資 `/api/investments`
 
