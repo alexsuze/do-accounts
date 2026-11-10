@@ -23,6 +23,12 @@ public class EmailService {
         this.props = props;
     }
 
+    /** 是否已設定 Resend（沒有設定時排程寄信直接略過） */
+    public boolean configured() {
+        String key = props.resend().apiKey();
+        return key != null && !key.isBlank();
+    }
+
     /** @return Resend 回傳的訊息 id */
     public String send(String to, String subject, String html, String text) {
         String key = props.resend().apiKey();

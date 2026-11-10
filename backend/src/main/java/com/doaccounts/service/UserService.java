@@ -107,6 +107,13 @@ public class UserService {
         return repo.findById(id).filter(u -> User.ACTIVE.equals(u.status)).orElse(null);
     }
 
+    /** 開啟每月報表的使用中帳號（排程用） */
+    public List<User> monthlyReportSubscribers() {
+        return repo.findAllByOrderByCreatedAtDesc().stream()
+                .filter(u -> User.ACTIVE.equals(u.status) && u.settingsOrDefault().monthlyReport && u.email != null)
+                .toList();
+    }
+
     public List<User> list(User admin) {
         requireAdmin(admin);
         return repo.findAllByOrderByCreatedAtDesc();
@@ -122,7 +129,7 @@ public class UserService {
     }
 
     /** 記帳偏好（SD 3.2 PUT /api/auth/me/settings）；欄位為 null 表示不變 */
-    public record SettingsRequest(String baseCurrency, String weekStart, Integer budgetWarnPct) {}
+    public record SettingsRequest(String baseCurrency, String weekStart, Integer budgetWarnPct, Boolean monthlyReport) {}
 
     public User updateSettings(User user, SettingsRequest req) {
         User u = repo.findById(user.id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "找不到此使用者"));
@@ -139,6 +146,7 @@ public class UserService {
             if (req.budgetWarnPct() < 1 || req.budgetWarnPct() > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "預算警示門檻需在 1～100 之間");
             st.budgetWarnPct = req.budgetWarnPct();
         }
+        if (req.monthlyReport() != null) st.monthlyReport = req.monthlyReport();
         u.settings = st;
         return repo.save(u);
     }

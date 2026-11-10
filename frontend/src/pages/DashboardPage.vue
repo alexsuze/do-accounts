@@ -2,7 +2,7 @@
   <div class="flex flex-col gap-6">
     <PageHeader eyebrow="Dashboard" title="總覽">
       <span class="num hidden rounded-[10px] border border-line bg-panel px-3.5 py-2.5 text-[13px] text-muted md:inline">{{ now }}</span>
-      <AppButton @click="ui.openTx()"><Plus :size="16" aria-hidden="true" />記帳</AppButton>
+      <AppButton title="記帳（快捷鍵 N）" @click="ui.openTx()"><Plus :size="16" aria-hidden="true" />記帳</AppButton>
     </PageHeader>
 
     <template v-if="d">

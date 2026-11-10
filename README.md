@@ -62,7 +62,7 @@ OAuth 用戶端 ID 的「已授權的 JavaScript 來源」需包含 `https://ale
    | `JWT_SECRET` | 通行證簽章密鑰，至少 32 字元；可填 `${{ secret(64) }}` 自動產生。未設定時正式環境拒絕啟動 |
    | `CORS_ALLOWED_ORIGIN` | `https://alexsuze.github.io` |
    | `FRONTEND_URL` | `https://alexsuze.github.io/do-accounts/` |
-   | `RESEND_API_KEY`、`RESEND_FROM_EMAIL` | 選用：新帳號申請通知信 |
+   | `RESEND_API_KEY`、`RESEND_FROM_EMAIL` | 選用：新帳號申請通知信、每月報表 Email（預設寄件地址只能寄給 Resend 帳號本人；要寄給別人需在 Resend 驗證網域） |
 
 3. push 到 `main` 即自動部署（`backend/railway.toml`）。
 

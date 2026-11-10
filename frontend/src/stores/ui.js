@@ -13,6 +13,8 @@ export const useUiStore = defineStore('ui', {
     /** 交易有異動時 +1，頁面 watch 它來重新載入（記帳視窗在任何頁面都能開） */
     ledgerVersion: 0,
     tradeDialog: null,
+    /** 按 / 時設為 true，明細頁的搜尋框取得焦點後改回 false */
+    focusSearch: false,
     /** 記帳視窗：null 為關閉；{ transaction?, preset? } 為開啟 */
     txDialog: null,
     /** 全域計算機（SA FR-11.1）：target 為帶入結果的 callback */

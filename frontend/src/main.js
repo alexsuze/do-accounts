@@ -11,3 +11,10 @@ app.use(createPinia())
 useUiStore().init()
 app.use(router)
 app.mount('#app')
+
+// PWA：正式環境註冊 Service Worker（開發時不註冊，避免快取干擾熱更新）
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL }).catch(() => {})
+  })
+}

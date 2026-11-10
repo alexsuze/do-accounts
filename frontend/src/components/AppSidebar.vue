@@ -22,6 +22,7 @@
         <span v-else class="flex size-8 items-center justify-center rounded-full bg-accent font-head font-bold text-accent-ink">{{ initial }}</span>
         <span class="min-w-0 flex-1 truncate text-sm">{{ auth.user?.name || auth.user?.email }}</span>
       </div>
+      <span class="px-1 text-xs text-muted">按 <kbd class="num rounded border border-line px-1">?</kbd> 查看快捷鍵</span>
     </div>
   </aside>
 </template>
