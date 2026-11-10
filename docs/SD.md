@@ -987,7 +987,7 @@ sequenceDiagram
 
 ### 5.9 PWA、快捷鍵
 
-- **PWA**：`public/manifest.webmanifest`（名稱、圖示 192／512／maskable、主畫面捷徑「記帳」`#/?new=1`、「明細」）、`public/sw.js`、`index.html` 的 `theme-color` 與 `apple-touch-icon`。正式環境才註冊 Service Worker（`main.js`）。
+- **PWA**：`public/manifest.webmanifest`（名稱、圖示 192／512／maskable、主畫面捷徑「記帳」`#/?quick=tx`（只在總覽處理；參數名稱不可與各頁的 query 重複）、「明細」）、`public/sw.js`、`index.html` 的 `theme-color` 與 `apple-touch-icon`。正式環境才註冊 Service Worker（`main.js`）。
 - **Service Worker 策略**（自寫，不引入套件，ADR-18）：只處理同網域 GET。頁面網路優先、離線時用快取的首頁；`/assets/`（檔名帶雜湊）快取優先，最多保留 80 個檔；其他靜態檔先回快取再背景更新。API 在另一個網域（Railway），一律走網路，不做離線記帳。
 - **快捷鍵**（SA FR-11.4，`utils/shortcuts.js`）：`N` 記帳、`/` 跳到明細並聚焦搜尋框、`?` 顯示快捷鍵說明、`Esc` 關閉視窗（Reka UI）。正在輸入文字、輸入法組字中、按著 Ctrl／⌘／Alt、或已有視窗開著時不觸發。
 - **回到頂部**（SA FR-11.2）：捲動超過一個畫面高度時出現在右下角（手機在底部導覽上方）。
