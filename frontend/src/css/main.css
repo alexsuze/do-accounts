@@ -26,6 +26,9 @@
   --accent-soft: rgba(14, 116, 144, .10);
   --inc: #047857;
   --exp: #BE123C;
+  /* K 線：台股慣例紅漲綠跌（不受收支顏色設定影響） */
+  --up: #BE123C;
+  --down: #047857;
   --warn: #B45309;
   --inc-soft: rgba(4, 120, 87, .08);
   --exp-soft: rgba(190, 18, 60, .08);
@@ -48,6 +51,8 @@
   --accent-soft: rgba(34, 211, 238, .12);
   --inc: #34D399;
   --exp: #FB7185;
+  --up: #FB7185;
+  --down: #34D399;
   --warn: #FBBF24;
   --inc-soft: rgba(52, 211, 153, .10);
   --exp-soft: rgba(251, 113, 133, .12);

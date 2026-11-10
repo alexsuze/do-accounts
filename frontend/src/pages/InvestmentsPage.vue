@@ -32,7 +32,7 @@
               <tr class="lbl border-y border-line bg-panel2 text-left">
                 <th class="px-5 py-2.5 font-normal">證券</th><th class="px-3 py-2.5 text-right font-normal">股數</th><th class="px-3 py-2.5 text-right font-normal">均價</th>
                 <th class="px-3 py-2.5 text-right font-normal">現價</th><th class="px-3 py-2.5 text-right font-normal">市值</th><th class="px-3 py-2.5 text-right font-normal">未實現損益</th>
-                <th class="px-3 py-2.5 text-right font-normal">報酬率</th><th class="w-36 px-5 py-2.5 font-normal">佔比</th>
+                <th class="px-3 py-2.5 text-right font-normal">報酬率</th><th class="w-36 px-3 py-2.5 font-normal">佔比</th><th class="w-14 px-3 py-2.5"><span class="sr-only">K 線圖</span></th>
               </tr>
             </thead>
             <tbody>
@@ -55,8 +55,11 @@
                 <td class="num px-3 py-2.5 text-right">{{ fmt(h.market_value_base) }}</td>
                 <td class="num px-3 py-2.5 text-right" :class="toneCls(h.unrealized_base)">{{ fmt(h.unrealized_base, 'always') }}</td>
                 <td class="num px-3 py-2.5 text-right" :class="toneCls(h.return_pct)">{{ pct(h.return_pct) }}</td>
-                <td class="px-5 py-2.5">
+                <td class="px-3 py-2.5">
                   <span class="flex items-center gap-2"><span class="h-1.5 flex-1 overflow-hidden rounded-full bg-panel2"><span class="block h-full bg-accent" :style="{ width: `${share(h)}%` }" /></span><span class="num w-12 text-right text-xs text-muted">{{ share(h).toFixed(1) }}%</span></span>
+                </td>
+                <td class="px-3 py-1.5 text-right">
+                  <IconButton :label="`開啟 ${h.security.symbol} K 線圖`" @click="openChart(h)"><ChartCandlestick :size="16" aria-hidden="true" /></IconButton>
                 </td>
               </tr>
             </tbody>
@@ -112,6 +115,7 @@
     </template>
     <AppCard v-else-if="!loaded" class="py-12 text-center text-muted">載入中…</AppCard>
 
+    <ChartDialog v-model:open="chartDlg.open" :security="chartDlg.security" :account-id="chartDlg.accountId" />
     <AppDialog v-model:open="priceDlg.open" :title="`輸入 ${priceDlg.symbol} 報價`" description="手動報價只影響你自己的計算；同一天再輸入一次會覆蓋。" :width="420">
       <form id="price-form" class="grid gap-3 sm:grid-cols-2" novalidate @submit.prevent="savePrice">
         <DateField v-model="priceDlg.date" label="日期" :max="today()" required />
@@ -128,7 +132,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { CircleAlert, Download, Plus, RefreshCw, TrendingUp } from 'lucide-vue-next'
+import { ChartCandlestick, CircleAlert, Download, Plus, RefreshCw, TrendingUp } from 'lucide-vue-next'
 import Amount from '../components/ui/Amount.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import AppCard from '../components/ui/AppCard.vue'
@@ -136,6 +140,8 @@ import AppDialog from '../components/ui/AppDialog.vue'
 import Badge from '../components/ui/Badge.vue'
 import DateField from '../components/ui/DateField.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import IconButton from '../components/ui/IconButton.vue'
+import ChartDialog from '../components/ChartDialog.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import SegmentedControl from '../components/ui/SegmentedControl.vue'
 import StatCard from '../components/ui/StatCard.vue'
@@ -165,6 +171,11 @@ const showAll = ref(false)
 const loaded = ref(false)
 const busy = ref('')
 const year = today().slice(0, 4)
+// K 線圖：「全部帳戶」時合併所有帳戶的持股算均價
+const chartDlg = reactive({ open: false, security: null, accountId: null })
+function openChart (h) {
+  Object.assign(chartDlg, { open: true, security: h.security, accountId: account.value === 'all' ? null : h.account_id })
+}
 const priceDlg = reactive({ open: false, securityId: null, symbol: '', currency: 'TWD', date: today(), close: '', error: '' })
 
 const investAccounts = computed(() => accounts.list.filter(a => a.kind === 'investment' && !a.archived_at))

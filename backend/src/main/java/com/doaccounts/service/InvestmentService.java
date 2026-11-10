@@ -53,9 +53,12 @@ public class InvestmentService {
     private final PriceRepository prices;
     private final QuoteService quotes;
     private final FxService fx;
+    private final CandleService candles;
 
     public InvestmentService(TransactionRepository txRepo, LedgerQueries ledger, AccountService accounts, CategoryService categories,
-                             SecurityRepository securities, PriceRepository prices, QuoteService quotes, FxService fx) {
+                             SecurityRepository securities, PriceRepository prices, QuoteService quotes, FxService fx,
+                             CandleService candles) {
+        this.candles = candles;
         this.txRepo = txRepo;
         this.ledger = ledger;
         this.accounts = accounts;
@@ -173,6 +176,60 @@ public class InvestmentService {
         if (securityIds.isEmpty()) return new PriceTable(List.of(), List.of());
         return new PriceTable(prices.findByUserIdIsNullAndSecurityIdInAndDateLessThanEqual(securityIds, upTo),
                 prices.findByUserIdAndSecurityIdInAndDateLessThanEqual(userId, securityIds, upTo));
+    }
+
+    // ---------- K 線圖 ----------
+
+    public record Bar(String date, BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close, long volume) {}
+
+    public record Point(String date, BigDecimal close) {}
+
+    public record Marker(String date, String tradeType, BigDecimal quantity, BigDecimal price) {}
+
+    /**
+     * K 線圖資料（SD 4.10）。kind = candle：台股日 K；kind = line：沒有行情來源的證券，只有收盤價（排程與手動報價）。
+     * avgCost：目前持股的均價（指定帳戶時為該帳戶，否則合併所有帳戶）；沒有持股時為 null。
+     * complete = false：交易所暫時連不到，只回傳已存的資料。bars 含 from 之前約 100 天（算均線用），畫面只顯示 from 以後。
+     */
+    public record Chart(Security security, String kind, String from, List<Bar> bars, List<Point> closes, List<Marker> markers,
+                        BigDecimal avgCost, BigDecimal quantity, boolean complete) {}
+
+    /** K 線圖多抓的天數（60 日均線約需 3 個月的交易日） */
+    static final int WARMUP_DAYS = 100;
+
+    public Chart chart(User user, String securityId, String accountId, int months) {
+        if (months < 1 || months > 36) throw bad("期間需為 1～36 個月");
+        Security sec = security(securityId);
+        java.time.LocalDate from = Dates.today().minusMonths(months);
+        List<Transaction> txs = ledger.investments(user.id).stream()
+                .filter(t -> accountId == null || accountId.equals(t.investment.accountId)).toList();
+
+        BigDecimal held = BigDecimal.ZERO;
+        BigDecimal cost = BigDecimal.ZERO;
+        for (Position p : HoldingCalculator.compute(txs, null).positions().values()) {
+            if (!sec.id.equals(p.securityId)) continue;
+            held = held.add(p.held);
+            cost = cost.add(p.cost);
+        }
+        BigDecimal avg = held.signum() == 0 ? null : cost.divide(held, 4, RoundingMode.HALF_UP);
+
+        List<Marker> markers = txs.stream()
+                .filter(t -> sec.id.equals(t.investment.securityId) && t.date.compareTo(from.toString()) >= 0)
+                .map(t -> new Marker(t.date, t.investment.tradeType, t.investment.quantity, t.investment.price)).toList();
+
+        if (CandleService.supported(sec)) {
+            // 多抓 100 天，讓期間一開始的 60 日均線就算得出來（前端只顯示 from 以後）
+            CandleService.Result r = candles.load(sec, from.minusDays(WARMUP_DAYS));
+            List<Bar> bars = r.candles().stream().map(c -> new Bar(c.date, c.open, c.high, c.low, c.close, c.volume)).toList();
+            return new Chart(sec, "candle", from.toString(), bars, List.of(), markers, avg, held, r.complete());
+        }
+        // 沒有行情來源：用收盤價畫折線（同一天手動價優先）
+        String today = Dates.today().toString();
+        java.util.TreeMap<String, Price> byDate = new java.util.TreeMap<>();
+        prices.findByUserIdIsNullAndSecurityIdInAndDateLessThanEqual(List.of(sec.id), today).forEach(p -> byDate.put(p.date, p));
+        prices.findByUserIdAndSecurityIdInAndDateLessThanEqual(user.id, List.of(sec.id), today).forEach(p -> byDate.put(p.date, p));
+        List<Point> closes = byDate.tailMap(from.toString(), true).values().stream().map(p -> new Point(p.date, p.close)).toList();
+        return new Chart(sec, "line", from.toString(), List.of(), closes, markers, avg, held, true);
     }
 
     // ---------- 交易 ----------

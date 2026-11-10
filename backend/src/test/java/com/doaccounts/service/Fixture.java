@@ -8,6 +8,8 @@ import com.doaccounts.model.ImportTemplate;
 import com.doaccounts.model.Price;
 import com.doaccounts.model.Security;
 import com.doaccounts.model.User;
+import com.doaccounts.model.Candle;
+import com.doaccounts.model.CandleMonth;
 import com.doaccounts.model.Category;
 import com.doaccounts.model.Transaction;
 import com.doaccounts.repository.AccountRepository;
@@ -17,6 +19,8 @@ import com.doaccounts.repository.ImportBatchRepository;
 import com.doaccounts.repository.ImportTemplateRepository;
 import com.doaccounts.repository.UserRepository;
 import com.doaccounts.repository.PriceRepository;
+import com.doaccounts.repository.CandleRepository;
+import com.doaccounts.repository.CandleMonthRepository;
 import com.doaccounts.repository.SecurityRepository;
 import com.doaccounts.repository.CategoryRepository;
 import com.doaccounts.repository.TransactionRepository;
@@ -59,6 +63,11 @@ class Fixture {
     final List<User> users = new ArrayList<>();
     final List<Security> securities = new ArrayList<>();
     final List<Price> prices = new ArrayList<>();
+    final List<Candle> candles = new ArrayList<>();
+    final List<CandleMonth> candleMonths = new ArrayList<>();
+    /** 假的 K 線資料來源：網址 → 回應 */
+    final Map<String, Map<?, ?>> candleFeed = new HashMap<>();
+    final List<String> candleRequests = new ArrayList<>();
     /** 假的台股清單（QuoteService 的資料來源） */
     final Map<String, List<Map<String, Object>>> quoteFeed = new HashMap<>();
 
@@ -73,6 +82,14 @@ class Fixture {
     final UserRepository userRepo = mock(UserRepository.class);
     final SecurityRepository securityRepo = mock(SecurityRepository.class);
     final PriceRepository priceRepo = mock(PriceRepository.class);
+    final CandleRepository candleRepo = mock(CandleRepository.class);
+    final CandleMonthRepository candleMonthRepo = mock(CandleMonthRepository.class);
+    final CandleService candleService = new CandleService(candleRepo, candleMonthRepo, url -> {
+        candleRequests.add(url);
+        Map<?, ?> body = candleFeed.get(url);
+        if (body == null) throw new IllegalStateException("連不到 " + url);
+        return body;
+    }, ms -> { });
 
     final AccountService accountService = new AccountService(accountRepo, ledger);
     final CategoryService categoryService = new CategoryService(categoryRepo, ledger);
@@ -85,7 +102,7 @@ class Fixture {
         if (rows == null) throw new IllegalStateException("連不到 " + url);
         return rows;
     });
-    final InvestmentService investmentService = new InvestmentService(txRepo, ledger, accountService, categoryService, securityRepo, priceRepo, quoteService, fxService);
+    final InvestmentService investmentService = new InvestmentService(txRepo, ledger, accountService, categoryService, securityRepo, priceRepo, quoteService, fxService, candleService);
     final ReportService reportService = new ReportService(accountService, categoryService, ledger, fxService, budgetService, investmentService);
     final DashboardService dashboardService = new DashboardService(accountService, ledger, fxService, budgetService, investmentService);
 
@@ -146,6 +163,15 @@ class Fixture {
         });
         when(securityRepo.findFirstByMarketAndSymbol(anyString(), anyString())).thenAnswer(inv -> securities.stream()
                 .filter(x -> x.market.equals(inv.getArgument(0)) && x.symbol.equals(inv.getArgument(1))).findFirst());
+        when(candleRepo.save(any(Candle.class))).thenAnswer(inv -> store(candles, inv.getArgument(0), "k"));
+        when(candleRepo.findFirstBySecurityIdAndDate(anyString(), anyString())).thenAnswer(inv -> candles.stream()
+                .filter(c -> c.securityId.equals(inv.getArgument(0)) && c.date.equals(inv.getArgument(1))).findFirst());
+        when(candleRepo.findBySecurityIdAndDateGreaterThanEqualOrderByDateAsc(anyString(), anyString())).thenAnswer(inv -> candles.stream()
+                .filter(c -> c.securityId.equals(inv.getArgument(0)) && c.date.compareTo(inv.getArgument(1)) >= 0)
+                .sorted((a, b) -> a.date.compareTo(b.date)).toList());
+        when(candleMonthRepo.save(any(CandleMonth.class))).thenAnswer(inv -> store(candleMonths, inv.getArgument(0), "km"));
+        when(candleMonthRepo.findFirstBySecurityIdAndMonth(anyString(), anyString())).thenAnswer(inv -> candleMonths.stream()
+                .filter(c -> c.securityId.equals(inv.getArgument(0)) && c.month.equals(inv.getArgument(1))).findFirst());
         when(priceRepo.save(any(Price.class))).thenAnswer(inv -> store(prices, inv.getArgument(0), "p"));
         when(priceRepo.findByUserIdIsNullAndSecurityIdInAndDateLessThanEqual(anyCollection(), anyString())).thenAnswer(inv -> prices.stream()
                 .filter(x -> x.userId == null && ((Collection<?>) inv.getArgument(0)).contains(x.securityId) && x.date.compareTo(inv.getArgument(1)) <= 0).toList());

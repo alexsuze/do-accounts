@@ -74,7 +74,7 @@ graph TB
 | 路由 | Vue Router，`createWebHashHistory` | 相同 | GitHub Pages 子路徑重新整理不會 404 |
 | HTTP | axios（`services/api.js` 統一 instance） | 相同 | 自動帶通行證、401 自動回登入頁、統一顯示錯誤 |
 | 拖曳 | vuedraggable | 相同 | 帳戶、分類排序 |
-| 圖表 | 自製 SVG 元件（`components/charts/`） | **新增** | 依示意圖繪製，顏色直接用 CSS 變數，深淺色自動切換（ADR-15） |
+| 圖表 | 自製 SVG 元件（`components/charts/`）；K 線圖用 lightweight-charts | **新增** | 依示意圖繪製，顏色直接用 CSS 變數，深淺色自動切換（ADR-15）；K 線需要縮放、十字線，改用 TradingView 開源的 lightweight-charts（約 45 KB，只在投資頁載入） |
 | 金額計算（前端） | decimal.js-light | **新增** | 表單即時計算、加總顯示 |
 | CSV 解析 | 自寫解析（`utils/csv.js`）＋ 瀏覽器 `TextDecoder`（UTF-8／Big5） | **新增** | 不引入套件；與貼上共用同一個解析器（ADR-17） |
 | 後端語言 | Java 21 | 相同 | |
@@ -783,6 +783,15 @@ sequenceDiagram
 - 內容：收入、支出、結餘；支出前 5 名大類（含百分比）；總預算（或分類預算合計）使用率與超支金額；月底淨資產與比上月的變化（含投資市值）；「查看完整報表」連結（`FRONTEND_URL`）。HTML 全部行內樣式，使用者輸入的名稱一律跳脫；另附純文字版本。
 - 失敗時同一位使用者再試一次，仍失敗記錄日誌、繼續寄下一位（NFR-7）。
 - API：`GET /api/reports/monthly-email/preview?month=`（`{ subject, html, text }`，不寄出）、`POST /api/reports/monthly-email/test`（寄上個月的報表給自己，每人 1 分鐘一次）；管理員 `POST /api/admin/jobs/monthly-report`。
+
+### 4.10 K 線圖（`CandleService`、`InvestmentService.chart`）
+
+- **資料**：台股個股每月日行情，上市查證交所 `exchangeReport/STOCK_DAY?date=YYYYMM01&stockNo=代號`、上櫃查櫃買中心 `afterTrading/tradingStock?code=代號&date=YYYY/MM/01`（免金鑰；櫃買成交量單位為千股）。存在 `candles`（`{ security_id, date, open, high, low, close, volume }`，全站共用，唯一 `{ security_id, date }`）。
+- **補抓策略**：只在開啟 K 線圖時補抓缺少的月份；`candle_months` 記錄每個月抓過的時間，過去的月份抓過一次（且在月份結束後抓的）就不再抓，本月 30 分鐘後才重抓。證交所限制查詢頻率，兩次查詢之間至少間隔 1.7 秒；某個月抓失敗就停止，回傳已有的資料並標示 `complete = false`。
+- **期間**：預設 6 個月，可切換 3M／6M／1Y／2Y；後端多抓 100 天，讓 60 日均線在期間一開始就算得出來，前端只顯示期間內。
+- **畫面**：TradingView lightweight-charts（Apache-2.0）；日 K（台股慣例紅漲綠跌，`--up`／`--down`，不受收支顏色設定影響）、成交量、5／20／60 日均線、目前持股均價的虛線（指定帳戶時只看該帳戶，否則合併所有帳戶）、自己的買進／賣出／配息標記。切換深淺色時重畫。
+- **沒有行情來源的證券**（美股、基金等）：改畫收盤價折線（排程與手動報價）。
+- API：`GET /api/investments/securities/{id}/chart?months=6&account_id=` → `{ security, kind: candle / line, from, bars, closes, markers, avg_cost, quantity, complete }`。
 
 ## 5. 前端設計
 

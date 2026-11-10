@@ -56,6 +56,14 @@ public class InvestmentController {
         return service.security(id);
     }
 
+    /** K 線圖資料；months 預設 6 */
+    @GetMapping("/securities/{id}/chart")
+    public InvestmentService.Chart chart(@RequestAttribute(AuthFilter.USER) User user, @PathVariable String id,
+                                         @RequestParam(name = "account_id", required = false) String accountId,
+                                         @RequestParam(defaultValue = "6") int months) {
+        return service.chart(user, id, accountId, months);
+    }
+
     @PostMapping("/securities")
     public Security createSecurity(@RequestBody SecurityRequest req) {
         return service.createSecurity(req);
