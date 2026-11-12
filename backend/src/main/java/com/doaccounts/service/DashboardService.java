@@ -78,7 +78,7 @@ public class DashboardService {
             if (Account.LIABILITY_KINDS.contains(a.kind) || v.signum() < 0) liabilities = liabilities.add(v);
             else assets = assets.add(v);
         }
-        BigDecimal invest = Currencies.round(investments.marketValues(user, List.of(today), rates, visible).get(today), base);
+        BigDecimal invest = Currencies.round(investments.marketValues(user, List.of(today), rates, visible, true).get(today), base);
         assets = Currencies.round(assets, base).add(invest);
         liabilities = Currencies.round(liabilities, base);
 

@@ -11,6 +11,8 @@ import com.doaccounts.model.User;
 import com.doaccounts.model.Candle;
 import com.doaccounts.model.CandleMonth;
 import com.doaccounts.model.Category;
+import com.doaccounts.model.IntradayQuote;
+import com.doaccounts.model.IntradayStatus;
 import com.doaccounts.model.Transaction;
 import com.doaccounts.repository.AccountRepository;
 import com.doaccounts.repository.BudgetRepository;
@@ -20,6 +22,8 @@ import com.doaccounts.repository.ImportTemplateRepository;
 import com.doaccounts.repository.UserRepository;
 import com.doaccounts.repository.PriceRepository;
 import com.doaccounts.repository.CandleRepository;
+import com.doaccounts.repository.IntradayQuoteRepository;
+import com.doaccounts.repository.IntradayStatusRepository;
 import com.doaccounts.repository.CandleMonthRepository;
 import com.doaccounts.repository.SecurityRepository;
 import com.doaccounts.repository.CategoryRepository;
@@ -64,6 +68,11 @@ class Fixture {
     final List<Security> securities = new ArrayList<>();
     final List<Price> prices = new ArrayList<>();
     final List<Candle> candles = new ArrayList<>();
+    final List<IntradayQuote> intradayQuotes = new ArrayList<>();
+    final List<IntradayStatus> intradayStatuses = new ArrayList<>();
+    /** 假的盤中價來源（null 表示連不到）與時鐘 */
+    Map<?, ?> misFeed;
+    java.time.ZonedDateTime now = java.time.ZonedDateTime.now(Dates.ZONE);
     final List<CandleMonth> candleMonths = new ArrayList<>();
     /** 假的 K 線資料來源：網址 → 回應 */
     final Map<String, Map<?, ?>> candleFeed = new HashMap<>();
@@ -84,6 +93,12 @@ class Fixture {
     final PriceRepository priceRepo = mock(PriceRepository.class);
     final CandleRepository candleRepo = mock(CandleRepository.class);
     final CandleMonthRepository candleMonthRepo = mock(CandleMonthRepository.class);
+    final IntradayQuoteRepository intradayRepo = mock(IntradayQuoteRepository.class);
+    final IntradayStatusRepository intradayStatusRepo = mock(IntradayStatusRepository.class);
+    final IntradayService intradayService = new IntradayService(intradayRepo, intradayStatusRepo, priceRepo, url -> {
+        if (misFeed == null) throw new IllegalStateException("連不到");
+        return misFeed;
+    }, () -> now);
     final CandleService candleService = new CandleService(candleRepo, candleMonthRepo, url -> {
         candleRequests.add(url);
         Map<?, ?> body = candleFeed.get(url);
@@ -102,7 +117,7 @@ class Fixture {
         if (rows == null) throw new IllegalStateException("連不到 " + url);
         return rows;
     });
-    final InvestmentService investmentService = new InvestmentService(txRepo, ledger, accountService, categoryService, securityRepo, priceRepo, quoteService, fxService, candleService);
+    final InvestmentService investmentService = new InvestmentService(txRepo, ledger, accountService, categoryService, securityRepo, priceRepo, quoteService, fxService, candleService, intradayService);
     final ReportService reportService = new ReportService(accountService, categoryService, ledger, fxService, budgetService, investmentService);
     final DashboardService dashboardService = new DashboardService(accountService, ledger, fxService, budgetService, investmentService);
 
@@ -163,6 +178,18 @@ class Fixture {
         });
         when(securityRepo.findFirstByMarketAndSymbol(anyString(), anyString())).thenAnswer(inv -> securities.stream()
                 .filter(x -> x.market.equals(inv.getArgument(0)) && x.symbol.equals(inv.getArgument(1))).findFirst());
+        when(intradayRepo.save(any(IntradayQuote.class))).thenAnswer(inv -> store(intradayQuotes, inv.getArgument(0), "iq"));
+        when(intradayRepo.findFirstBySecurityIdAndDate(anyString(), anyString())).thenAnswer(inv -> intradayQuotes.stream()
+                .filter(q -> q.securityId.equals(inv.getArgument(0)) && q.date.equals(inv.getArgument(1))).findFirst());
+        when(intradayRepo.findBySecurityIdInAndDate(anyCollection(), anyString())).thenAnswer(inv -> intradayQuotes.stream()
+                .filter(q -> ((Collection<?>) inv.getArgument(0)).contains(q.securityId) && q.date.equals(inv.getArgument(1))).toList());
+        when(intradayStatusRepo.save(any(IntradayStatus.class))).thenAnswer(inv -> {
+            IntradayStatus st = inv.getArgument(0);
+            intradayStatuses.removeIf(x -> x.id.equals(st.id));
+            intradayStatuses.add(st);
+            return st;
+        });
+        when(intradayStatusRepo.findById(anyString())).thenAnswer(inv -> intradayStatuses.stream().filter(x -> x.id.equals(inv.getArgument(0))).findFirst());
         when(candleRepo.save(any(Candle.class))).thenAnswer(inv -> store(candles, inv.getArgument(0), "k"));
         when(candleRepo.findFirstBySecurityIdAndDate(anyString(), anyString())).thenAnswer(inv -> candles.stream()
                 .filter(c -> c.securityId.equals(inv.getArgument(0)) && c.date.equals(inv.getArgument(1))).findFirst());

@@ -80,7 +80,7 @@ public class ReportService {
         List<String> ends = new ArrayList<>();
         for (YearMonth m = first; !m.isAfter(now); m = m.plusMonths(1)) ends.add(m.equals(now) ? today.toString() : m.atEndOfMonth().toString());
         java.util.Set<String> visible = all.stream().filter(a -> a.visible).map(a -> a.id).collect(java.util.stream.Collectors.toSet());
-        Map<String, BigDecimal> invest = investments.marketValues(user, ends, rates, visible);
+        Map<String, BigDecimal> invest = investments.marketValues(user, ends, rates, visible, false);
 
         List<NetWorthPoint> points = new ArrayList<>();
         for (YearMonth m = first; !m.isAfter(now); m = m.plusMonths(1)) {
