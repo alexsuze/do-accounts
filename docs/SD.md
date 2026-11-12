@@ -308,6 +308,19 @@ db.transactions.aggregate([
 
 唯一索引改為 `{ security_id, date, user_id }`。
 
+**intraday_quotes**（盤中價，全站共用；只放當天、與 `prices` 歷史分開，不進報表）
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| _id | ObjectId | |
+| security_id | string | 唯一索引 `{ security_id, date }` |
+| date | string | `YYYY-MM-DD`（交易日） |
+| price | Decimal128 | 最近一筆成交價 |
+| time | string | 成交時間 `HH:mm:ss`（台北時間） |
+| fetched_at | Date | 抓取時間（UTC） |
+
+**intraday_status**（每個交易日一份，`_id` = 日期）：`last_success`、`last_failure`（`HH:mm`），用來顯示「盤中價更新失敗」訊息。
+
 ### 2.7 budgets
 
 | 欄位 | 型別 | 說明 |
@@ -502,12 +515,12 @@ public record TransactionRequest(
 | GET | `/api/investments/securities?q=&market=` | 代號開頭或名稱包含；台股代號查不到時查 TWSE／TPEx 清單並自動建立（00 開頭為 ETF） |
 | GET | `/api/investments/securities/{id}` | |
 | POST | `/api/investments/securities` | 手動建立 `{ market, symbol, name, currency, asset_type }`；同市場同代號回傳既有的 |
-| GET | `/api/investments/holdings?account_id=` | `[{ account_id, security, quantity, avg_cost, cost, price, price_date, price_source, manual_price, market_value, unrealized, realized, dividends, return_pct, market_value_base, unrealized_base }]`；沒有報價時 price 為 null、市值以成本計 |
-| GET | `/api/investments/summary?account_id=` | 本位幣：`market_value, cost, unrealized, unrealized_pct, realized_this_year, sells_this_year, realized_total, dividends_total, dividends_this_year, dividend_count_this_year, return_pct, oldest_price_date, allocation: { market, asset_type, currency: [{ key, value, percentage }] }` |
+| GET | `/api/investments/holdings?account_id=` | `[{ account_id, security, quantity, avg_cost, cost, price, price_date, price_source, manual_price, price_kind (close / intraday / manual), price_time (盤中價的 HH:mm:ss), market_value, unrealized, realized, dividends, return_pct, market_value_base, unrealized_base }]`；沒有報價時 price 為 null、市值以成本計 |
+| GET | `/api/investments/summary?account_id=` | 本位幣：`market_value, cost, unrealized, unrealized_pct, realized_this_year, sells_this_year, realized_total, dividends_total, dividends_this_year, dividend_count_this_year, return_pct, oldest_price_date, intraday_notice（今天最後一次抓盤中價失敗時的訊息，否則 null）, allocation: { market, asset_type, currency: [{ key, value, percentage }] }` |
 | GET | `/api/investments/trades?account_id&security_id&from&to&page&size` | `{ items: [{ transaction, security, realized }], total }`，新到舊；賣出帶已實現損益 |
 | GET / POST / PUT / DELETE | `/api/investments/trades[/{id}]` | body `{ trade_type, account_id, security_id, date, quantity, price, fee, tax, settlement_account_id, settlement_amount, note, version }`；寫入前重算該使用者全部投資交易，超賣回 422；PUT 需帶 version |
 | PUT | `/api/investments/prices` | `{ security_id, date, close }` 手動報價（只影響自己） |
-| POST | `/api/investments/prices/refresh` | 立即更新台股報價（同一台伺服器 5 分鐘內只能一次，否則 429） |
+| POST | `/api/investments/prices/refresh` | 立即更新台股報價：先抓收盤價，交易日 09:00 後再抓盤中價（SD 4.11）。回傳 `{ ok, message }`；同一台伺服器開盤日 1 分鐘、其他時間 5 分鐘內只能一次，否則 429 |
 | GET | `/api/export/trades?account_id=` | 投資交易 CSV |
 
 ### 3.10 匯入匯出 `/api/import`、`/api/export`
@@ -792,6 +805,14 @@ sequenceDiagram
 - **畫面**：TradingView lightweight-charts（Apache-2.0）；日 K（台股慣例紅漲綠跌，`--up`／`--down`，不受收支顏色設定影響）、成交量、5／20／60 日均線、目前持股均價的虛線（指定帳戶時只看該帳戶，否則合併所有帳戶）、自己的買進／賣出／配息標記。切換深淺色時重畫。
 - **沒有行情來源的證券**（美股、基金等）：改畫收盤價折線（排程與手動報價）。
 - API：`GET /api/investments/securities/{id}/chart?months=6&account_id=` → `{ security, kind: candle / line, from, bars, closes, markers, avg_cost, quantity, complete }`。
+
+### 4.11 盤中價（`IntradayService`）
+
+- **來源**：證交所「基本市況報導」`mis.twse.com.tw/stock/api/getStockInfo.jsp?json=1&delay=0&ex_ch=tse_0050.tw|otc_6488.tw`（非正式 API，約 20 秒延遲），一次查詢最多 50 檔。
+- **何時抓**：只有使用者按「更新報價」才抓；週一到週五 09:00 之後，且該證券今天的正式收盤價還沒進來（13:30 後到收盤價進來前抓到的是最後成交價）。不是今天的資料（假日）、09:00 前的成交、沒有成交（`z = "-"`）都不採用；沒有成交不算失敗，沿用先前的盤中價。
+- **用在哪**：投資頁的持倉、摘要與總覽的淨資產採用「今天的盤中價優先，直到今天的收盤價進來」；淨資產趨勢、報表、每月 Email、K 線圖一律用收盤價。
+- **失敗**：保留先前抓到的盤中價，顯示「盤中價更新失敗（11:05），目前顯示 10:32 更新的盤中價」；今天沒抓成功過就顯示「…，目前顯示收盤價」。
+- **畫面**：持倉表現價下方標示「盤中 11/12 10:29」或「收盤 11/06 TWSE」，持倉標題列顯示目前採用盤中價或收盤價與時間。
 
 ## 5. 前端設計
 

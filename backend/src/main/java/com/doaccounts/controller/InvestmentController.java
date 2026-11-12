@@ -12,6 +12,8 @@ import com.doaccounts.service.InvestmentService.Summary;
 import com.doaccounts.service.InvestmentService.TradePage;
 import com.doaccounts.service.InvestmentService.TradeRequest;
 import com.doaccounts.service.QuoteService;
+import com.doaccounts.service.IntradayService;
+import com.doaccounts.repository.SecurityRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,16 +36,21 @@ import java.util.List;
 @RequestMapping("/api/investments")
 public class InvestmentController {
 
-    /** 「更新報價」按鈕的最短間隔，避免一直打交易所的 API */
+    /** 「更新報價」按鈕的最短間隔，避免一直打交易所的 API：盤中（可抓盤中價時）1 分鐘，其他時間 5 分鐘 */
     private static final long REFRESH_INTERVAL_MS = 5 * 60_000L;
+    private static final long INTRADAY_INTERVAL_MS = 60_000L;
 
     private final InvestmentService service;
     private final QuoteService quotes;
+    private final IntradayService intraday;
+    private final SecurityRepository securities;
     private volatile long lastRefresh;
 
-    public InvestmentController(InvestmentService service, QuoteService quotes) {
+    public InvestmentController(InvestmentService service, QuoteService quotes, IntradayService intraday, SecurityRepository securities) {
         this.service = service;
         this.quotes = quotes;
+        this.intraday = intraday;
+        this.securities = securities;
     }
 
     @GetMapping("/securities")
@@ -118,14 +125,25 @@ public class InvestmentController {
         return service.setPrice(user.id, req.securityId(), req.date(), req.close());
     }
 
-    /** 立即更新台股報價（同一台伺服器 5 分鐘內只執行一次） */
+    /** ok = false 表示來源連不到（畫面用警告樣式顯示 message） */
+    public record RefreshResult(boolean ok, String message) {}
+
+    /**
+     * 立即更新台股報價（SD 4.11）：先更新收盤價；平日 09:00 以後、當天收盤價還沒公布前，再抓盤中價。
+     * 盤中 1 分鐘、其他時間 5 分鐘只能執行一次（全站共用）。
+     */
     @PostMapping("/prices/refresh")
-    public QuoteService.Result refresh() {
+    public RefreshResult refresh() {
         long now = System.currentTimeMillis();
-        if (now - lastRefresh < REFRESH_INTERVAL_MS) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "報價剛更新過，請 5 分鐘後再試");
+        boolean market = intraday.marketDay();
+        long gap = market ? INTRADAY_INTERVAL_MS : REFRESH_INTERVAL_MS;
+        if (now - lastRefresh < gap) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "報價剛更新過，請 " + (market ? "1" : "5") + " 分鐘後再試");
         }
         lastRefresh = now;
-        return quotes.refresh(true);
+        QuoteService.Result close = quotes.refresh(true);
+        IntradayService.Result intra = intraday.refresh(securities.findAll());
+        if (intra.attempted()) return new RefreshResult(!intra.failed(), intra.message());
+        return new RefreshResult(!close.message().contains("無法連線"), close.message());
     }
 }

@@ -54,11 +54,13 @@ public class InvestmentService {
     private final QuoteService quotes;
     private final FxService fx;
     private final CandleService candles;
+    private final IntradayService intraday;
 
     public InvestmentService(TransactionRepository txRepo, LedgerQueries ledger, AccountService accounts, CategoryService categories,
                              SecurityRepository securities, PriceRepository prices, QuoteService quotes, FxService fx,
-                             CandleService candles) {
+                             CandleService candles, IntradayService intraday) {
         this.candles = candles;
+        this.intraday = intraday;
         this.txRepo = txRepo;
         this.ledger = ledger;
         this.accounts = accounts;
@@ -451,9 +453,11 @@ public class InvestmentService {
 
     /**
      * 一檔持股。金額為證券幣別，*_base 為本位幣（最新匯率）。price 為 null 表示還沒有任何報價，市值以成本計。
+     * priceKind：close 收盤價、intraday 盤中價（priceTime 為成交時間 HH:mm:ss）、manual 手動輸入。
      */
     public record Holding(String accountId, Security security, BigDecimal quantity, BigDecimal avgCost, BigDecimal cost,
                           BigDecimal price, String priceDate, String priceSource, boolean manualPrice,
+                          String priceKind, String priceTime,
                           BigDecimal marketValue, BigDecimal unrealized, BigDecimal realized, BigDecimal dividends,
                           BigDecimal returnPct, BigDecimal marketValueBase, BigDecimal unrealizedBase) {}
 
@@ -467,7 +471,7 @@ public class InvestmentService {
     public record Summary(String baseCurrency, BigDecimal marketValue, BigDecimal cost, BigDecimal unrealized, BigDecimal unrealizedPct,
                           BigDecimal realizedThisYear, int sellsThisYear, BigDecimal realizedTotal, BigDecimal dividendsTotal,
                           BigDecimal dividendsThisYear, int dividendCountThisYear, BigDecimal returnPct, String oldestPriceDate,
-                          Map<String, List<Slice>> allocation) {}
+                          Map<String, List<Slice>> allocation, String intradayNotice) {}
 
     /** 總市值、損益、股利與資產配置（本位幣，FR-9.6、9.8） */
     public Summary summary(User user, String accountId) {
@@ -515,11 +519,15 @@ public class InvestmentService {
         BigDecimal ret = invested.signum() == 0 ? BigDecimal.ZERO : pct(unrealized.add(realizedTotal).add(divTotal).add(priorGain), invested);
         return new Summary(base, Currencies.round(mv, base), Currencies.round(cost, base), Currencies.round(unrealized, base),
                 pct(unrealized, cost), Currencies.round(realizedYear, base), sells, Currencies.round(realizedTotal, base),
-                Currencies.round(divTotal, base), Currencies.round(divYear, base), divCount, ret, oldest, allocation);
+                Currencies.round(divTotal, base), Currencies.round(divYear, base), divCount, ret, oldest, allocation,
+                intraday.failureNotice());
     }
 
-    /** 某天的投資總市值（本位幣，給淨資產用，FR-9.7）；accountIds 為 null 表示全部帳戶 */
-    public Map<String, BigDecimal> marketValues(User user, List<String> dates, RateTable rates, Set<String> accountIds) {
+    /**
+     * 某天的投資總市值（本位幣，給淨資產用，FR-9.7）；accountIds 為 null 表示全部帳戶。
+     * useIntraday：今天這一天是否用盤中價（總覽用；淨資產趨勢、報表一律用收盤價）
+     */
+    public Map<String, BigDecimal> marketValues(User user, List<String> dates, RateTable rates, Set<String> accountIds, boolean useIntraday) {
         Map<String, BigDecimal> out = new LinkedHashMap<>();
         if (dates.isEmpty()) return out;
         List<Transaction> txs = ledger.investments(user.id);
@@ -530,18 +538,36 @@ public class InvestmentService {
         String last = dates.stream().max(String::compareTo).orElseThrow();
         Map<String, Security> secs = securityMap(txs);
         PriceTable pt = priceTable(user.id, secs.keySet(), last);
+        String today = Dates.today().toString();
+        Map<String, com.doaccounts.model.IntradayQuote> intra = useIntraday && dates.contains(today)
+                ? intraday.quotes(secs.keySet(), today) : Map.of();
         for (String d : dates) {
             BigDecimal sum = BigDecimal.ZERO;
             for (Position p : HoldingCalculator.compute(txs, d).positions().values()) {
                 if (p.held.signum() == 0 || (accountIds != null && !accountIds.contains(p.accountId))) continue;
                 Security sec = secs.get(p.securityId);
-                Price px = pt.at(p.securityId, d);
-                BigDecimal value = px == null ? p.cost : p.held.multiply(px.close);
+                Current cur = current(pt.at(p.securityId, d), d.equals(today) ? intra.get(p.securityId) : null);
+                BigDecimal value = cur == null ? p.cost : p.held.multiply(cur.price());
                 sum = sum.add(rates.toBase(value, sec == null ? FxService.baseOf(user) : sec.currency, d));
             }
             out.put(d, sum);
         }
         return out;
+    }
+
+    /** 目前使用的價格：kind = close / intraday / manual；time 只有盤中價有 */
+    record Current(BigDecimal price, String date, String source, String kind, String time) {}
+
+    /**
+     * 收盤價與盤中價取一：今天有盤中價、而且收盤價（或手動價）不是今天的 → 用盤中價；否則用收盤價或手動價。
+     * 當天的正式收盤價（或自己輸入的當天價格）進來後，就不再用盤中價。
+     */
+    static Current current(Price px, com.doaccounts.model.IntradayQuote q) {
+        if (q != null && (px == null || px.date.compareTo(q.date) < 0)) {
+            return new Current(q.price, q.date, "twse-mis", "intraday", q.time);
+        }
+        if (px == null) return null;
+        return new Current(px.close, px.date, px.source, px.userId != null ? "manual" : "close", null);
     }
 
     private record Snapshot(Map<String, Position> positions, Map<String, Security> securities, List<Holding> holdings, RateTable rates) {}
@@ -551,14 +577,17 @@ public class InvestmentService {
         Map<String, Position> positions = HoldingCalculator.compute(txs, date).positions();
         Map<String, Security> secs = securityMap(txs);
         PriceTable pt = priceTable(user.id, secs.keySet(), date);
+        // 只有「今天」才用盤中價；歷史日期一律收盤價
+        Map<String, com.doaccounts.model.IntradayQuote> intra = date.equals(Dates.today().toString())
+                ? intraday.quotes(secs.keySet(), date) : Map.of();
         RateTable rates = fx.table(user, date);
         List<Holding> list = new ArrayList<>();
         for (Position p : positions.values()) {
             if (p.held.signum() == 0) continue;
             Security sec = secs.get(p.securityId);
             if (sec == null) continue;
-            Price px = pt.at(p.securityId, date);
-            BigDecimal mv = px == null ? p.cost : p.held.multiply(px.close);
+            Current cur = current(pt.at(p.securityId, date), intra.get(p.securityId));
+            BigDecimal mv = cur == null ? p.cost : p.held.multiply(cur.price());
             BigDecimal unrealized = mv.subtract(p.cost);
             // 報酬率 =（未實現＋已實現＋股利＋期初持股開始記帳前的損益）÷ 累計投入
             BigDecimal ret = p.invested.signum() == 0 ? BigDecimal.ZERO
@@ -566,7 +595,8 @@ public class InvestmentService {
             String base = FxService.baseOf(user);
             BigDecimal mvBase = Currencies.round(rates.toBase(mv, sec.currency, date), base);
             list.add(new Holding(p.accountId, sec, p.held, p.avg().setScale(4, RoundingMode.HALF_UP), money(p.cost, sec.currency),
-                    px == null ? null : px.close, px == null ? null : px.date, px == null ? null : px.source, px != null && px.userId != null,
+                    cur == null ? null : cur.price(), cur == null ? null : cur.date(), cur == null ? null : cur.source(),
+                    cur != null && "manual".equals(cur.kind()), cur == null ? null : cur.kind(), cur == null ? null : cur.time(),
                     money(mv, sec.currency), money(unrealized, sec.currency), money(p.realized, sec.currency), money(p.dividends, sec.currency),
                     ret, mvBase, Currencies.round(rates.toBase(unrealized, sec.currency, date), base)));
         }

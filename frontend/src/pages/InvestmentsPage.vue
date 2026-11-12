@@ -24,8 +24,11 @@
       <AppCard :padded="false" class="overflow-hidden">
         <div class="flex flex-wrap items-center gap-3 px-5 py-4">
           <h2 class="m-0 mr-auto font-head text-base font-semibold">持倉</h2>
-          <span class="num text-xs text-muted">平均成本法{{ s.oldest_price_date ? ` · 報價日 ${s.oldest_price_date}` : '' }} · 金額以 {{ s.base_currency }} 計</span>
+          <span class="num text-xs text-muted">平均成本法 · {{ priceNote }} · 金額以 {{ s.base_currency }} 計</span>
         </div>
+        <p v-if="s.intraday_notice" role="status" class="m-0 flex items-center gap-2 border-t border-line bg-warn-soft px-5 py-2.5 text-[13px] text-warn">
+          <CircleAlert :size="15" aria-hidden="true" />{{ s.intraday_notice }}
+        </p>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[900px] border-collapse text-sm">
             <thead>
@@ -189,11 +192,19 @@ const qty = (v) => Number(v).toLocaleString('en-US', { maximumFractionDigits: 6 
 const px = (v, cur) => (cur !== base.value ? `${cur} ` : '') + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
 const total = computed(() => holdings.value.reduce((t, h) => t + Number(h.market_value_base), 0))
 const share = (h) => total.value ? Number(h.market_value_base) / total.value * 100 : 0
+// 現價下方的小字：盤中價（成交時間）／收盤價（日期與來源）／手動
 const priceTag = (h) => {
   if (!h.price) return { text: '尚無報價', cls: 'text-warn' }
+  if (h.price_kind === 'intraday') return { text: `盤中 ${shortDate(h.price_date)} ${h.price_time.slice(0, 5)}`, cls: 'text-accent' }
   const src = h.manual_price ? '手動' : h.price_source === 'twse' ? 'TWSE' : h.price_source === 'tpex' ? 'TPEx' : h.price_source
-  return { text: `${shortDate(h.price_date)} ${src}`, cls: h.manual_price || !hasAutoQuote(h.security.market) ? 'text-warn' : 'text-muted' }
+  return { text: `${h.manual_price ? '' : '收盤 '}${shortDate(h.price_date)} ${src}`, cls: h.manual_price || !hasAutoQuote(h.security.market) ? 'text-warn' : 'text-muted' }
 }
+// 持倉標題的報價說明：有盤中價時顯示最新的成交時間
+const priceNote = computed(() => {
+  const intra = holdings.value.filter(h => h.price_kind === 'intraday').map(h => h.price_time).sort()
+  if (intra.length) return `盤中價 ${intra.at(-1).slice(0, 5)}（約 20 秒延遲）`
+  return s.value?.oldest_price_date ? `收盤價 ${s.value.oldest_price_date}` : '收盤價'
+})
 // 沒有自動報價來源、且報價不是今天的持股
 const needPrice = computed(() => holdings.value.filter(h => !hasAutoQuote(h.security.market) && h.price_date !== today()))
 const allocation = computed(() => {
@@ -248,9 +259,12 @@ async function load () {
 async function refreshQuotes () {
   busy.value = 'quotes'
   try {
-    const { data } = await api.post('/investments/prices/refresh')
-    toast.success(data.message)
+    const { data } = await api.post('/investments/prices/refresh', null, { timeout: 30000 })
+    if (data.ok) toast.success(data.message)
+    else toast.warn(data.message)
     await load()
+  } catch {
+    // 錯誤訊息已由 api.js 顯示（例如 1 分鐘內重複更新）
   } finally {
     busy.value = ''
   }

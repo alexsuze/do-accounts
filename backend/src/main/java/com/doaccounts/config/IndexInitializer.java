@@ -5,6 +5,7 @@ import com.doaccounts.model.Budget;
 import com.doaccounts.model.Candle;
 import com.doaccounts.model.CandleMonth;
 import com.doaccounts.model.Category;
+import com.doaccounts.model.IntradayQuote;
 import com.doaccounts.model.ExchangeRate;
 import com.doaccounts.model.ImportBatch;
 import com.doaccounts.model.ImportTemplate;
@@ -71,6 +72,8 @@ public class IndexInitializer {
         mongo.indexOps(Security.class).createIndex(new Index().on("market", Sort.Direction.ASC).on("symbol", Sort.Direction.ASC).unique());
         mongo.indexOps(Price.class).createIndex(new Index().on("security_id", Sort.Direction.ASC).on("date", Sort.Direction.ASC).on("user_id", Sort.Direction.ASC).unique());
         mongo.indexOps(Transaction.class).createIndex(new Index().on("user_id", Sort.Direction.ASC).on("kind", Sort.Direction.ASC).on("date", Sort.Direction.ASC));
+        // SD 4.11：盤中價
+        mongo.indexOps(IntradayQuote.class).createIndex(new Index().on("security_id", Sort.Direction.ASC).on("date", Sort.Direction.ASC).unique());
         // SD 4.10：K 線資料
         mongo.indexOps(Candle.class).createIndex(new Index().on("security_id", Sort.Direction.ASC).on("date", Sort.Direction.ASC).unique());
         mongo.indexOps(CandleMonth.class).createIndex(new Index().on("security_id", Sort.Direction.ASC).on("month", Sort.Direction.ASC).unique());
