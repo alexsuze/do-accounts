@@ -75,9 +75,10 @@ class ChartTest {
         int expected = months(6);
         assertEquals(expected, f.candleRequests.size(), "6 個月前再往前 100 天（算均線用）到本月");
         assertTrue(c.bars().size() >= 2 * (expected - 1), "每月 2 天（第一個月可能只取到起始日以後）");
-        var first = c.bars().getFirst();
-        assertEquals(1_234_000L, first.volume());
-        assertEquals(0, new BigDecimal("104.00").compareTo(first.close()));
+        // 每月 1 日那一列（不用 getFirst：起始日剛好是某月 2 日時，第一根是 2 日那列）
+        var day1 = c.bars().stream().filter(b -> b.date().endsWith("-01")).findFirst().orElseThrow();
+        assertEquals(1_234_000L, day1.volume());
+        assertEquals(0, new BigDecimal("104.00").compareTo(day1.close()));
         assertTrue(c.bars().stream().anyMatch(b -> b.date().compareTo(c.from()) < 0), "含期間之前的資料（算均線用）");
         assertEquals(0, new BigDecimal("105").compareTo(c.avgCost()));
         assertEquals(0, new BigDecimal("2000").compareTo(c.quantity()));
