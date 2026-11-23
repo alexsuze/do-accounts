@@ -741,6 +741,9 @@ for trade in 該帳戶該證券的投資交易（依 date、created_at 排序）
 | TWO 上櫃 | TPEx OpenAPI `tpex_mainboard_quotes`（免金鑰） | 同上 |
 | US／基金／其他 | 手動輸入 | — |
 
+- 上市、上櫃兩份清單同時抓（各自失敗互不影響）。
+- **對外連線時限**：所有對外 HTTP（證交所、櫃買中心、匯率、Resend、Google）都由 `config/Http` 建立，連線 5 秒、讀取 20 秒。沒有時限時，對方不回應會讓連線永遠卡住，而報價更新一次只跑一個，之後的排程與手動更新會全部排隊逾時（2026-11 實際發生）。前端「更新報價」等待 60 秒。
+
 ### 4.6 報表演算法（`ReportService`，MongoTemplate aggregation）
 
 **淨資產趨勢**

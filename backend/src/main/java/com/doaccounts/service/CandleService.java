@@ -1,5 +1,6 @@
 package com.doaccounts.service;
 
+import com.doaccounts.config.Http;
 import com.doaccounts.model.Candle;
 import com.doaccounts.model.CandleMonth;
 import com.doaccounts.model.Security;
@@ -9,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -48,7 +48,7 @@ public class CandleService {
 
     @Autowired
     public CandleService(CandleRepository candles, CandleMonthRepository months) {
-        this(candles, months, url -> RestClient.create().get().uri(url).retrieve().body(Map.class), Thread::sleep);
+        this(candles, months, url -> Http.client().get().uri(url).retrieve().body(Map.class), Thread::sleep);
     }
 
     CandleService(CandleRepository candles, CandleMonthRepository months, Function<String, Map<?, ?>> fetcher, Sleeper sleeper) {

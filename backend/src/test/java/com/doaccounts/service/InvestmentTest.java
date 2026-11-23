@@ -200,6 +200,27 @@ class InvestmentTest {
         assertNull(f.quoteService.lookup("TW", "0050"), "來源連不到時查不到，不丟例外");
     }
 
+    /** 上市、上櫃同時抓：上市要等上櫃先開始才回應，若是依序抓就會等到逾時而失敗 */
+    @Test
+    void quoteRefreshFetchesBothMarketsInParallel() {
+        var tpexStarted = new java.util.concurrent.CountDownLatch(1);
+        var svc = new QuoteService(f.securityRepo, f.priceRepo, url -> {
+            if (url.equals(QuoteService.TPEX_URL)) {
+                tpexStarted.countDown();
+                throw new IllegalStateException("櫃買中心沒回應");
+            }
+            try {
+                if (!tpexStarted.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("沒有同時抓");
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+            return f.quoteFeed.get(url);
+        });
+        var r = svc.refresh(true);
+        assertTrue(r.message().startsWith("TWO 來源無法連線；"), r.message());
+        assertTrue(r.updated() >= 1, "上市照常更新，上櫃失敗不影響");
+    }
+
     @Test
     void backupIncludesInvestments() {
         f.investmentService.create(ME, trade("buy", broker, etf, "2026-03-01", "100", "150", null, null, null));

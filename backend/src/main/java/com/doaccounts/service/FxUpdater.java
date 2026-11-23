@@ -1,5 +1,6 @@
 package com.doaccounts.service;
 
+import com.doaccounts.config.Http;
 import com.doaccounts.model.ExchangeRate;
 import com.doaccounts.repository.ExchangeRateRepository;
 import org.slf4j.Logger;
@@ -9,7 +10,6 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -43,7 +43,7 @@ public class FxUpdater {
 
     @Autowired
     public FxUpdater(ExchangeRateRepository repo) {
-        this(repo, url -> RestClient.create().get().uri(url).retrieve().body(Map.class));
+        this(repo, url -> Http.client().get().uri(url).retrieve().body(Map.class));
     }
 
     FxUpdater(ExchangeRateRepository repo, Function<String, Map<?, ?>> fetcher) {

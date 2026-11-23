@@ -1,5 +1,6 @@
 package com.doaccounts.service;
 
+import com.doaccounts.config.Http;
 import com.doaccounts.model.Price;
 import com.doaccounts.model.Security;
 import com.doaccounts.repository.PriceRepository;
@@ -10,15 +11,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 /**
@@ -41,12 +47,14 @@ public class QuoteService {
     private final SecurityRepository securities;
     private final PriceRepository prices;
     private final Function<String, List<Map<String, Object>>> fetcher;
-    private final Map<String, Map<String, Quote>> cache = new HashMap<>();
-    private final Map<String, Long> cachedAt = new HashMap<>();
+    private final Map<String, Map<String, Quote>> cache = new ConcurrentHashMap<>();
+    private final Map<String, Long> cachedAt = new ConcurrentHashMap<>();
+    /** 上市、上櫃兩份清單同時抓，等待時間取較慢的一邊而不是相加 */
+    private static final ExecutorService FETCH = Executors.newVirtualThreadPerTaskExecutor();
 
     @Autowired
     public QuoteService(SecurityRepository securities, PriceRepository prices) {
-        this(securities, prices, url -> RestClient.create().get().uri(url).retrieve()
+        this(securities, prices, url -> Http.client().get().uri(url).retrieve()
                 .body(new ParameterizedTypeReference<List<Map<String, Object>>>() {}));
     }
 
@@ -79,16 +87,20 @@ public class QuoteService {
         int updated = 0;
         int skipped = 0;
         StringBuilder errors = new StringBuilder();
-        for (String market : List.of("TW", "TWO")) {
+        Map<String, CompletableFuture<Map<String, Quote>>> jobs = new LinkedHashMap<>();
+        for (String market : List.of("TW", "TWO")) jobs.put(market, CompletableFuture.supplyAsync(() -> directory(market), FETCH));
+        List<Security> all = securities.findAll();
+        for (var job : jobs.entrySet()) {
+            String market = job.getKey();
             Map<String, Quote> dir;
             try {
-                dir = directory(market);
-            } catch (RuntimeException e) {
+                dir = job.getValue().join();
+            } catch (CompletionException e) {
                 errors.append(market).append(" 來源無法連線；");
-                log.warn("報價來源 {} 失敗：{}", market, e.getMessage());
+                log.warn("報價來源 {} 失敗：{}", market, e.getCause() == null ? e.getMessage() : e.getCause().getMessage());
                 continue;
             }
-            for (Security s : securities.findAll()) {
+            for (Security s : all) {
                 if (!market.equals(s.market)) continue;
                 Quote q = dir.get(s.symbol);
                 if (q == null || q.close() == null) {
@@ -115,7 +127,7 @@ public class QuoteService {
         prices.save(p);
     }
 
-    private synchronized Map<String, Quote> directory(String market) {
+    private Map<String, Quote> directory(String market) {
         Long at = cachedAt.get(market);
         if (at != null && System.currentTimeMillis() - at < CACHE_MS && cache.containsKey(market)) return cache.get(market);
         List<Map<String, Object>> rows = fetcher.apply("TW".equals(market) ? TWSE_URL : TPEX_URL);

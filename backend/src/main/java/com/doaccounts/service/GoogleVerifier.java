@@ -1,5 +1,6 @@
 package com.doaccounts.service;
 
+import com.doaccounts.config.Http;
 import com.doaccounts.config.AppProperties;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -22,7 +23,7 @@ public class GoogleVerifier {
 
     private static final Set<String> ISSUERS = Set.of("accounts.google.com", "https://accounts.google.com");
 
-    private final RestClient client = RestClient.create("https://oauth2.googleapis.com");
+    private final RestClient client = Http.client("https://oauth2.googleapis.com");
     private final AppProperties props;
 
     public GoogleVerifier(AppProperties props) {
