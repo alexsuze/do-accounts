@@ -1,5 +1,6 @@
 package com.doaccounts.service;
 
+import com.doaccounts.config.Http;
 import com.doaccounts.config.AppProperties;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -17,7 +18,7 @@ import java.util.Map;
 public class EmailService {
 
     private final AppProperties props;
-    private final RestClient client = RestClient.create("https://api.resend.com");
+    private final RestClient client = Http.client("https://api.resend.com");
 
     public EmailService(AppProperties props) {
         this.props = props;

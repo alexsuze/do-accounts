@@ -1,5 +1,6 @@
 package com.doaccounts.service;
 
+import com.doaccounts.config.Http;
 import com.doaccounts.model.IntradayQuote;
 import com.doaccounts.model.IntradayStatus;
 import com.doaccounts.model.Security;
@@ -10,7 +11,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
@@ -50,7 +50,7 @@ public class IntradayService {
 
     @Autowired
     public IntradayService(IntradayQuoteRepository quotes, IntradayStatusRepository statuses, PriceRepository prices) {
-        this(quotes, statuses, prices, url -> RestClient.create().get().uri(url).retrieve().body(Map.class),
+        this(quotes, statuses, prices, url -> Http.client().get().uri(url).retrieve().body(Map.class),
                 () -> ZonedDateTime.now(Dates.ZONE));
     }
 

@@ -259,7 +259,7 @@ async function load () {
 async function refreshQuotes () {
   busy.value = 'quotes'
   try {
-    const { data } = await api.post('/investments/prices/refresh', null, { timeout: 30000 })
+    const { data } = await api.post('/investments/prices/refresh', null, { timeout: 60000 })
     if (data.ok) toast.success(data.message)
     else toast.warn(data.message)
     await load()
